@@ -1,11 +1,12 @@
 library(xlsx); library(dplyr); library(tidyr); library(ggplot2); library(magrittr)
 
-loadSurveyMonkeyXLS <- function(fname, idcols) {
-  header <- names(read.xlsx2(fname, sheetIndex = 1, endRow = 1)) 
+loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
+  header <- names(read.xlsx2(fname, sheetIndex = 1, endRow = 1, check.names = F)) 
   #blank headers indicate additional responses under the same header as the previous - fill those in
   for(i in seq_along(header)) if(grepl("^X\\.", header[i+1])) header[i+1] <- header[i]
-  dat <- read.xlsx2(fname, sheetIndex = 1, startRow = 2)
+  dat <- read.xlsx2(fname, sheetIndex = 1, startRow = 2, check.names = F)
   names(header) <- names(dat)
+  header <- gsub("<.*?>", "", header)
   
   makeNA <- function(x) {
     if(class(x) == "factor") levels(x)[levels(x) == ""] <- NA
@@ -14,8 +15,7 @@ loadSurveyMonkeyXLS <- function(fname, idcols) {
   dat %<>% mutate_each(funs(makeNA))
   
   #separate off free text responses
-  others <- c(grep("specify", names(dat), ignore.case = T),
-              grep("open.ended", names(dat), ignore.case = T))
+  others <- grep("specify|open.ended|suggestions", names(dat), ignore.case = T)
   freeText <- dat[ , union(idcols,others)]
   names(freeText) <- header[names(freeText)]
   dat <- dat[, -others]
