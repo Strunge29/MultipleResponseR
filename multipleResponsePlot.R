@@ -22,7 +22,7 @@ multipleResponsePlot <- function(responses, categories) {
   
 }
 
-explorePlots <- function(dat, scales, outputFolder = F) {
+explorePlots <- function(dat, scales, outputFolder = character(0)) {
   comb <- dat
   
   sapply(levels(comb$question), function(q) {
@@ -36,11 +36,12 @@ explorePlots <- function(dat, scales, outputFolder = F) {
     n <- suppressWarnings(as.numeric(as.character(answers$response)))
     if(!anyNA(n)) answers$response <- n
     
-    if(outputFolder) {
-      fname <- paste0(outputFolder, substring(gsub("[^[:alnum:]]","",q), 1, 150), ".png", collapse = "")
+    if(length(outputFolder)) {
+      if(!dir.exists(outputFolder)) dir.create(outputFolder)
+      fname <- paste0(outputFolder, "/", substring(gsub("[^[:alnum:]]","",q), 1, 150), ".png", collapse = "")
       i <- 1
       while(file.exists(fname)) {
-        fname <- paste0(outputFolder, substring(gsub("[^[:alnum:]]","",q), 1, 150), i, ".png", collapse = "")
+        fname <- paste0(outputFolder, "/", substring(gsub("[^[:alnum:]]","",q), 1, 150), i, ".png", collapse = "")
         i <- i + 1
       }
       png(fname, height = 600, width = 800)
@@ -63,7 +64,7 @@ explorePlots <- function(dat, scales, outputFolder = F) {
       plt <- plt + theme(axis.text.x = element_text(angle = 90, vjust = .5))
     print(plt)
     #browser()
-    if(outputFolder) dev.off()
+    if(length(outputFolder)) dev.off()
     #print(plt)
     #browser()
   })
