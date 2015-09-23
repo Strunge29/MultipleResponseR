@@ -12,7 +12,7 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
   names(header) <- names(header2) <- names(dat)
   
   #separate off free text responses
-  others <- grep("specify|open.ended|suggestions", names(dat), ignore.case = T)
+  others <- grep("specify|open.ended|suggestions|if.not", names(dat), ignore.case = T)
   freeText <- dat[ , union(idcols,others)]
   names(freeText) <- header[names(freeText)]
   dat <- dat[, -others]
