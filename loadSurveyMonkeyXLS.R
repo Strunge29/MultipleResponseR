@@ -4,84 +4,80 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
   header <- names(read.xlsx2(fname, sheetIndex = 1, endRow = 1, check.names = F)) 
   #blank headers indicate additional responses under the same header as the previous - fill those in
   for(i in seq_len(length(header)-1)) if(header[i+1] == " ") header[i+1] <- header[i]
+  #load in with unaltered column names to capture second level headers
   dat <- read.xlsx2(fname, sheetIndex = 1, startRow = 2, check.names = F)
-    #header <- gsub("<.*?>", "", header)
-  header2 <- names(dat)
-  dat <- data.frame(dat) #fix invalid/duplicate names
-  #create key for lookup of headers by column name
-  names(header) <- names(header2) <- names(dat)
+  print("files loaded")
+  #data frame to hold various properties learned about each question
+  #starting with first and second level headers
+  qProps <- data.frame(header = header, header2 = names(dat), stringsAsFactors = F)
+  
+  names(dat)[idcols] <- qProps[idcols, "header"]
+  dat <- data.frame(dat) #fix invalid/duplicate names for dplyr/tidyr methods to work
+  
+  #row names create a key for lookup of properties by column name/question
+  row.names(qProps) <- names(dat)
   
   makeNA <- function(x) {
     if(class(x) == "factor") levels(x)[levels(x) == ""] <- NA
     x
   }
   dat %<>% mutate_each(funs(makeNA))
-  
+  print("NAs mutated")
 
-
-  uniqueAnswers <- sapply(dat, function(x)all(table(x) <= 1))
-  
-
-  #ID multiple response item blocks for later grouping
-  multiblocktypes <- sapply(names(dat), function(x){
+  #Questions where every answer is unique and not a number are likely to be free text
+  qProps$uniqueAnswers <- sapply(dat, function(x)all(table(x) == 1))
+  print("unique")
+  #suppressWarnings(qProps$numbers <- sapply(dat, function(x)any(!is.na(as.numeric(x)))))
+  qProps$numbers <- F
+  print("numbers")
+  #Questions where there is only one type of answer and it matches the 
+  #subheading are multiple response questions (checkboxes). For multiple
+  #response matrix questions, the response is part of the subheading (which also
+  #contains the question)
+  qProps$multiblocktypes <- sapply(names(dat), function(x){
     items <- levels(dat[[x]])
     #items <- setdiff(items, "")
-    if(length(items) == 1 && items == header2[x]) return(1)
-    if(length(items) == 1 && grepl(items, header2[x])) return(2)
+    if(length(items) == 1 && items == qProps[x, "header2"]) return(1)
+    if(length(items) == 1 && grepl(items, qProps[x, "header2"])) return(2)
     0
   })
-  multiblocks <- multiblocktypes > 0
-  multimatrices <- multiblocktypes == 2
-  
-  # ID free text answers as questions where every response is unique.
-  # exclude multiblocks because an item with only one respondant would be false positive
-  others <- uniqueAnswers & !(multiblocks)
+  qProps %<>% mutate(multiblocks = multiblocktypes > 0)
+  qProps %<>% mutate(multimatrices = multiblocktypes == 2)
+  print("multis")
+  # Free text answers selected as those where every anser is unique, not a
+  # number, and not part of a multiple response block (which would match if only
+  # one non-missing answer was present)
+  qProps %<>% mutate(others = uniqueAnswers & !(multiblocks | numbers))
 
-    #separate off free text responses
-  #TODO: alternative strategy - find any question where no two answers are the same
-  # Even if false positive, results wouldn't be useful for plotting
-  #   others <- grep("specify|open.ended|suggestions|if.not|additional.comments", 
-  #                  names(dat), ignore.case = T) 
-#     freeText <- dat[ , union(idcols,others)]
-#     names(freeText) <- header[names(freeText)]
-#     dat <- dat[, -others]
-#     header <- header[-others]
-#     header2 <- header2[-others]
-
+  # ID single item responses to ignore extra header level when naming question
+  qProps %<>% mutate(singletons = header %in% names(table(header))[table(header) == 1])
+  # item labels for single response (radio button) matrices
+  qProps %<>% mutate(subgroup = ifelse(multiblocks | singletons, NA, header2))
   
-  #ID single item responses to ignore extra header level when naming question
-  singletons <- header %in% names(table(header))[table(header) == 1]
-  
-
-  names(dat)[idcols] <- header[idcols]
-  #create key for updating the question levels later
-#   header <- ifelse(multiblocks | singletons, header, 
-#                    paste(header, sub(":$", "", header2), sep = ": "))
-  subgroup <- ifelse(multiblocks | singletons, NA, header2)
-  names(subgroup) <- names(header2)
-  
-  gathercols <- setdiff(names(dat), names(dat)[c(idcols, others)]) 
+  qProps %<>% mutate(type  = ifelse(numbers, "Numeric Entry", "Response Block")) %>% 
+    mutate(type = ifelse(singletons, "Single Question", type)) %>%
+    mutate(type = ifelse(multiblocks, "Multiple Response Question", type)) %>%
+    mutate(type = ifelse(multimatrices, "Multiple Response Block", type)) %>%
+    mutate(type = ifelse(others, "Free Text", type))
+  print("props determined")
+  #names(dat)[idcols] <- qProps[idcols, "header"]
+  gathercols <- setdiff(names(dat), c(names(dat)[idcols], row.names(qProps[qProps$others, ]))) 
   dat <- gather_(dat, "question", "response", gathercols, na.rm=TRUE)
-  #rename questions using their headers
-  #header <- gsub("\\.+", " ", header)
-  #header <- sub(" :", ":", header)
-  #header <- sub(" $", "", header)
+  print("data gathered")
   dat$question <- as.character(dat$question)
 
-  #dat$subgroup <- 
+  dat$subgroup <- as.factor(qProps[dat$question, "subgroup"])
+  dat$type <- as.factor(qProps[dat$question, "type"])
   #tweak MR matrix questions because the true response of value is in the 2nd level header
-  key <- regexec("(.+) - (.+)", header2[multimatrices]) %>% 
-    regmatches(x = header2[multimatrices]) %>% do.call(what = rbind)
-  multimatrixrows <- which(dat$question %in% names(header2)[multimatrices])
+  #TODO make this optional
+  key <- regexec("(.+) - (.+)", qProps[qProps$multimatrices, "header2"]) %>% 
+    regmatches(x = qProps[qProps$multimatrices, "header2"]) %>% do.call(what = rbind)
+  multimatrixrows <- which(dat$question %in% row.names(qProps)[qProps$multimatrices])
   dat$response[multimatrixrows] <- key[dat$question[multimatrixrows], 2]
-  dat$question[multimatrixrows] <- key[dat$question[multimatrixrows], 3]
+  dat$subgroup[multimatrixrows] <- key[dat$question[multimatrixrows], 3]
 
-  dat$question <- ifelse(is.na(header[dat$question]), dat$question, header[dat$question])
-  
-  dat %<>% mutate(type = ifelse(question %in% header[others], "Free Text", "Response Block")) %>%
-    mutate(type = ifelse(question %in% header[singletons], "Single Question", type)) %>%
-    mutate(type = ifelse(question %in% header[multiblocks], "Multiple Response Block", type)) 
-  dat$type[multimatrixrows] <- "Multiple Response Block"
+  #dat$question[!multimatrixrows] <- qProps[dat$question[!multimatrixrows], "header"]
+  dat$question <- qProps[dat$question, "header"]
   
   dat$question <- as.factor(dat$question)
   
