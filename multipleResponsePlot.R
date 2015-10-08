@@ -23,11 +23,10 @@ multipleResponsePlot <- function(responses, categories) {
 }
 
 explorePlots <- function(dat, scales, outputFolder = character(0)) {
-  comb <- dat
-  
-  sapply(levels(comb$question), function(q) {
+  dat <- filter(dat, type != "Free Text")
+  sapply(levels(dat$question), function(q) {
     
-    answers <- filter(comb, question == q)
+    answers <- filter(dat, question == q)
     if(nrow(answers) == 0) return(NULL)
     #convert ordered scale factors
     scale <- which(sapply(scales, function(x)all(answers$response %in% x)))
@@ -51,15 +50,22 @@ explorePlots <- function(dat, scales, outputFolder = character(0)) {
       pos <- spaces[which.min(abs(spaces - nchar(q)/2))]
       substr(q, pos, pos) <- "\n"
     }
-    plt <- ggplot(data = answers, aes(x = response)) + 
-      geom_bar(position="dodge") +
+    plt <- switch(
+      as.character(answers$type[1]),
+      `Response Block` = ggplot(answers, aes(x = subgroup, y = response)) + 
+        geom_boxplot(),
+      `Multiple Response Block` = ggplot(answers, aes(x = response, fill = subgroup)) + 
+        geom_bar(position = "dodge"),
+      ggplot(answers, aes(x = response)) +
+        geom_bar())
+    plt <- plt + 
       #scale_fill_discrete(labels = c(pre = "Before", post = "After")) +
       labs(title= q, x = "Response", y = "Count") + 
       #guides(fill = guide_legend(title = "Time")) + 
-      theme_bw() 
+      theme_bw()
     if(nchar(q) > 250) plt <- plt + theme(plot.title = element_text(size = 8)) else
       plt <- plt + theme(plot.title = element_text(size = 10))
-    if(length(scale) == 1) plt <- plt + scale_x_discrete(limits = scales[[scale]])
+    #if(length(scale) == 1) plt <- plt + scale_x_discrete(limits = scales[[scale]])
     if(sum(nchar(unique(as.character(answers$response)))) > 50) 
       plt <- plt + theme(axis.text.x = element_text(angle = 90, vjust = .5))
     print(plt)
@@ -69,4 +75,8 @@ explorePlots <- function(dat, scales, outputFolder = character(0)) {
     #browser()
   })
   NULL
+}
+
+plotQuestion <- function(data, title) {
+  
 }

@@ -31,8 +31,7 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
   qProps$uniqueAnswers <- sapply(dat, function(x)all(table(x) == 1))
   print("unique")
   suppressWarnings(qProps$numbers <- 
-                     sapply(dat, function(x)all(!is.na(as.numeric(as.character(na.omit(x)))))))
-  #qProps$numbers <- F
+      sapply(dat, function(x)all(!is.na(as.numeric(as.character(na.omit(x)))))))
   print("numbers")
   #Questions where there is only one type of answer and it matches the 
   #subheading are multiple response questions (checkboxes). For multiple
@@ -40,7 +39,6 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
   #contains the question)
   qProps$multiBlockItemTypes <- sapply(names(dat), function(x){
     items <- levels(dat[[x]])
-    #items <- setdiff(items, "")
     if(length(items) == 1 && items == qProps[x, "header2"]) return(1)
     if(length(items) == 1 && grepl(items, qProps[x, "header2"])) return(2)
     0
@@ -53,10 +51,14 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
   # Free text answers selected as those where every anser is unique, not a
   # number, and not part of a multiple response block (which would match if only
   # one non-missing answer was present)
-  qProps %<>% mutate(others = uniqueAnswers & !(multiBlockItems | numbers))
+  qProps %<>% mutate(others = (uniqueAnswers & !(multiBlockItems | numbers)) |
+                       header2 == "Open-Ended Response")
   
   # ID single item responses to ignore extra header level when naming question
-  qProps %<>% mutate(singletons = header %in% names(table(header))[table(header) == 1])
+  qProps %>% filter(!others) %>% magrittr::extract2("header") %>% table %>%
+    extract(. == 1) %>% names ->
+    singles
+  qProps %<>% mutate(singletons = header %in% singles)
 
   colNameGroups <- split(qProps$varNames, qProps$header)
   row.names(qProps) <- qProps$varNames
