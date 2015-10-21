@@ -56,7 +56,7 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
   
   # ID single item responses to ignore extra header level when naming question
   qProps %>% filter(!others) %>% magrittr::extract2("header") %>% table %>%
-    extract(. == 1) %>% names ->
+    magrittr::extract(. == 1) %>% names ->
     singles
   qProps %<>% mutate(singletons = header %in% singles)
 
@@ -81,7 +81,7 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
                      multiMatrix = isMultiMatrix[header])
   # item labels for single response (radio button) matrices
   qProps %<>% mutate(subgroup = ifelse(multiBlock | singletons, NA, header2))
-  
+  #TODO id blocks of numeric type questions, "Numeric Block"
   qProps %<>% mutate(type  = ifelse(numbers, "Numeric Entry", "Response Block")) %>% 
     mutate(type = ifelse(singletons, "Single Question", type)) %>%
     mutate(type = ifelse(multiBlock, "Multiple Response Question", type)) %>%
@@ -118,3 +118,6 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
 }
 
 
+removeHTML <- function(x) {
+  gsub("<.*?>", " ", x)
+}

@@ -24,59 +24,91 @@ multipleResponsePlot <- function(responses, categories) {
 
 explorePlots <- function(dat, scales, outputFolder = character(0)) {
   dat <- filter(dat, type != "Free Text")
-  sapply(levels(dat$question), function(q) {
-    
-    answers <- filter(dat, question == q)
-    if(nrow(answers) == 0) return(NULL)
-    #convert ordered scale factors
+#   invisible(sapply(levels(dat$question), function(q) {
+#     answers <- filter(dat, question == q)
+#     sapply(split(answers, answers$type), function(type) {
+#       if(nrow(type) == 0) return(NULL)
+#       scale <- which(sapply(scales, function(x)all(type$response %in% x)))
+#       if(length(scale) == 1) type$response <- 
+#         ordered(type$response, levels = scales[[scale]])
+#       n <- suppressWarnings(as.numeric(as.character(type$response)))
+#       if(!anyNA(n)) type$response <- n
+#       plotQuestion(type, q, outputFolder)
+#     })
+# 
+#  }))
+  invisible(lapply(split(dat, list(dat$question, dat$type), drop = T), 
+                   function(answers) {
     scale <- which(sapply(scales, function(x)all(answers$response %in% x)))
-    if(length(scale) == 1) answers$response <- ordered(answers$response, levels = scales[[scale]])
-    #convert numeric responses
+    if(length(scale) == 1) answers$response <- 
+        ordered(answers$response, levels = scales[[scale]])
     n <- suppressWarnings(as.numeric(as.character(answers$response)))
     if(!anyNA(n)) answers$response <- n
-    
-    if(length(outputFolder)) {
-      if(!dir.exists(outputFolder)) dir.create(outputFolder)
-      fname <- paste0(outputFolder, "/", substring(gsub("[^[:alnum:]]","",q), 1, 150), ".png", collapse = "")
-      i <- 1
-      while(file.exists(fname)) {
-        fname <- paste0(outputFolder, "/", substring(gsub("[^[:alnum:]]","",q), 1, 150), i, ".png", collapse = "")
-        i <- i + 1
-      }
-      png(fname, height = 600, width = 800)
-    }
-    if(nchar(q) > 118) {
-      spaces <- gregexpr(" ", q)[[1]]
-      pos <- spaces[which.min(abs(spaces - nchar(q)/2))]
-      substr(q, pos, pos) <- "\n"
-    }
-    plt <- switch(
-      as.character(answers$type[1]),
-      `Response Block` = ggplot(answers, aes(x = subgroup, y = response)) + 
-        geom_boxplot(),
-      `Multiple Response Block` = ggplot(answers, aes(x = response, fill = subgroup)) + 
-        geom_bar(position = "dodge"),
-      ggplot(answers, aes(x = response)) +
-        geom_bar())
-    plt <- plt + 
-      #scale_fill_discrete(labels = c(pre = "Before", post = "After")) +
-      labs(title= q, x = "Response", y = "Count") + 
-      #guides(fill = guide_legend(title = "Time")) + 
-      theme_bw()
-    if(nchar(q) > 250) plt <- plt + theme(plot.title = element_text(size = 8)) else
-      plt <- plt + theme(plot.title = element_text(size = 10))
-    #if(length(scale) == 1) plt <- plt + scale_x_discrete(limits = scales[[scale]])
-    if(sum(nchar(unique(as.character(answers$response)))) > 50) 
-      plt <- plt + theme(axis.text.x = element_text(angle = 90, vjust = .5))
-    print(plt)
-    #browser()
-    if(length(outputFolder)) dev.off()
-    #print(plt)
-    #browser()
-  })
-  NULL
+    plotQuestion(answers, as.character(answers$question[1]), outputFolder)
+  }))
+  
 }
 
-plotQuestion <- function(data, title) {
-  
+plotQuestion <- function(answers, title, outputFolder = character(0)) {
+  t <- as.character(unique(answers$type))
+  if (length(t) > 1) stop("Unable to plot quesiton block with multiple response types")
+  if(length(outputFolder)) {
+    if(!dir.exists(outputFolder)) dir.create(outputFolder)
+    fname <- paste0(outputFolder, "/", substring(gsub("[^[:alnum:]]","",title), 1, 150), ".png", collapse = "")
+    i <- 1
+    while(file.exists(fname)) {
+      fname <- paste0(outputFolder, "/", substring(gsub("[^[:alnum:]]","",title), 1, 150), i, ".png", collapse = "")
+      i <- i + 1
+    }
+    png(fname, height = 600, width = 800)
+  }
+
+  xLabsLength <- sum(nchar(unique(as.character(answers$response))))
+  ylab <- "Count"
+  xlab <- "Response" 
+  switch(
+    t,
+    `Response Block` = {
+      ylab <- "Response"
+      xlab <- "Item" 
+      ratio <- max(table(answers$response, answers$subgroup)) *
+               length(levels(factor(answers$subgroup)))
+      ratio <- pmin(1, 1 - (ratio - 15)/(ratio + 30))
+      plt <- ggplot(answers, aes(x = subgroup, y = as.numeric(response))) +
+        geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 1, 
+                     dotsize = .1, stackratio = ratio) +
+        scale_y_discrete(limits = levels(answers$response))
+      xLabsLength <- sum(nchar(unique(as.character(answers$subgroup))))},
+    `Multiple Response Block` = {
+      plt <- ggplot(answers, aes(x = response, fill = subgroup)) + 
+        geom_bar(position = "dodge")},
+    {plt <- ggplot(answers, aes(x = response)) + geom_bar()
+    if("ordered" %in% class(answers$response)) plt <- plt + 
+        scale_x_discrete(limits = levels(answers$response))})
+  s <- unique(answers$subgroup)
+  if(length(s) == 1 && !is.na(s[1])) 
+    title <- paste0(title, s[1], collapse = " ")
+  if(nchar(title) > 118) {
+    spaces <- gregexpr(" ", title)[[1]]
+    pos <- spaces[which.min(abs(spaces - nchar(title)/2))]
+    substr(title, pos, pos) <- "\n"
+  }
+  plt <- plt + 
+    labs(title= title, x = xlab, y = ylab) + 
+    theme_classic()
+  if(nchar(title) > 250) plt <- plt + theme(plot.title = element_text(size = 8)) else
+    plt <- plt + theme(plot.title = element_text(size = 10))
+  if(xLabsLength > 50) 
+    plt <- plt + theme(axis.text.x = element_text(angle = 6, vjust = .75, hjust = .5))
+  print(plt)
+  if(length(outputFolder)) dev.off()
+  plt
+}
+
+breakStrings <- function(x) {
+  spaces <- gregexpr(" ", x)
+  pos <- mapply(function(y, mid){y[which.min(abs(y - mid))]},
+                y = spaces, mid = nchar(x)/2)
+  substr(x, pos, pos) <- "\n"
+  x
 }
