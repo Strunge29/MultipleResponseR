@@ -1,5 +1,5 @@
 library(xlsx); library(dplyr); library(tidyr); library(ggplot2); library(magrittr)
-
+#TODO check for presence of RespondentID, create if missing (needed for plot stats)
 loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
   header <- names(read.xlsx2(fname, sheetIndex = 1, endRow = 1, check.names = F)) 
   #blank headers indicate additional responses under the same header as the previous - fill those in
@@ -120,4 +120,14 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
 
 removeHTML <- function(x) {
   gsub("<.*?>", " ", x)
+}
+
+exportFreeText <- function(data) {
+  data %<>% filter(type == "Free Text", !is.na(response), !(response %in% c("NA", "N/A", "n/a")))
+  lapply(split(data, data$question), function(x) {
+    d = data.frame(x$response)
+    names(d)[1] <- as.character(x$question[1])
+    write.csv(d, paste0(substring(gsub("[^[:alnum:]]","",x$question[1]), 1, 150),
+                     ".csv", c = ""))
+  }) %>% invisible
 }

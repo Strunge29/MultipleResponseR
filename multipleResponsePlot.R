@@ -1,4 +1,4 @@
-require(ggplot2)
+require(ggplot2); require(dplyr); require(Hmisc)
 multipleResponsePlot <- function(responses, categories) {
   
   #d <- d[!is.na(d[[demographic]]) & d[[demographic]] != "other", ]
@@ -23,50 +23,54 @@ multipleResponsePlot <- function(responses, categories) {
 }
 
 explorePlots <- function(dat, scales, outputFolder = character(0)) {
-  dat <- filter(dat, type != "Free Text")
-#   invisible(sapply(levels(dat$question), function(q) {
-#     answers <- filter(dat, question == q)
-#     sapply(split(answers, answers$type), function(type) {
-#       if(nrow(type) == 0) return(NULL)
-#       scale <- which(sapply(scales, function(x)all(type$response %in% x)))
-#       if(length(scale) == 1) type$response <- 
-#         ordered(type$response, levels = scales[[scale]])
-#       n <- suppressWarnings(as.numeric(as.character(type$response)))
-#       if(!anyNA(n)) type$response <- n
-#       plotQuestion(type, q, outputFolder)
-#     })
-# 
-#  }))
+  #todo, check structure (maybe S3 class?)
+  dat <- dat %>% mutate(sampSize = length(unique(RespondentID))) %>%
+    filter(type != "Free Text") 
+    
+
   invisible(lapply(split(dat, list(dat$question, dat$type), drop = T), 
                    function(answers) {
     scale <- which(sapply(scales, function(x)all(answers$response %in% x)))
     if(length(scale) == 1) answers$response <- 
-        ordered(answers$response, levels = scales[[scale]])
+        ordered(answers$response, levels = scales[[scale]]) else if(length(scale) > 1)
+          warning("Multiple scales matched to responses for '", 
+                  dat$question[1], 
+                  "'. Plotting as discrete/nominal responses. If ordinal is desired, ensure all items in exactly one scale match to responses for this question.")
     n <- suppressWarnings(as.numeric(as.character(answers$response)))
     if(!anyNA(n)) answers$response <- n
     plotQuestion(answers, as.character(answers$question[1]), outputFolder)
   }))
   
 }
-
-plotQuestion <- function(answers, title, outputFolder = character(0)) {
+#TODO: extract the file creation to seperate method (maybe S3 print method)
+plotQuestion <- function(answers, title, outputFolder = character(0), 
+                         pop.estimates = T) {
   t <- as.character(unique(answers$type))
-  if (length(t) > 1) stop("Unable to plot quesiton block with multiple response types")
-  if(length(outputFolder)) {
-    if(!dir.exists(outputFolder)) dir.create(outputFolder)
-    fname <- paste0(outputFolder, "/", substring(gsub("[^[:alnum:]]","",title), 1, 150), ".png", collapse = "")
-    i <- 1
-    while(file.exists(fname)) {
-      fname <- paste0(outputFolder, "/", substring(gsub("[^[:alnum:]]","",title), 1, 150), i, ".png", collapse = "")
-      i <- i + 1
-    }
-    png(fname, height = 600, width = 800)
-  }
+  if (length(t) > 1) stop("Unable to plot question block with multiple response types")
+#   if(length(outputFolder)) {
+#     if(!dir.exists(outputFolder)) dir.create(outputFolder)
+#     fname <- paste0(outputFolder, "/", substring(gsub("[^[:alnum:]]","",title), 1, 150), ".png", collapse = "")
+#     i <- 1
+#     while(file.exists(fname)) {
+#       fname <- paste0(outputFolder, "/", substring(gsub("[^[:alnum:]]","",title), 1, 150), i, ".png", collapse = "")
+#       i <- i + 1
+#     }
+#     png(fname, height = 600, width = 800)
+#   }
 
   xLabsLength <- sum(nchar(unique(as.character(answers$response))))
   ylab <- "Count"
   xlab <- "Response" 
-  switch(
+  `Population Estimates` <- "Mean and\n95% Confidence Interval"
+  answers %>% group_by(subgroup, response, sampSize) %>%
+    summarise(count = n()) %>% 
+    mutate(prop = count/sampSize) -> 
+    answerProportions 
+  if(pop.estimates) answerProportions <- 
+    mutate(answerProportions, 
+           upr = binom.test(count, sampSize)$conf.int[2],
+           lwr = binom.test(count, sampSize)$conf.int[1])
+    switch(
     t,
     `Response Block` = {
       ylab <- "Response"
@@ -78,13 +82,40 @@ plotQuestion <- function(answers, title, outputFolder = character(0)) {
         geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 1, 
                      dotsize = .1, stackratio = ratio) +
         scale_y_discrete(limits = levels(answers$response))
+      if(pop.estimates && is.ordered(answers$response)) plt <- plt +
+        stat_summary(aes(color = `Population Estimates`), 
+                     fun.data = mean_cl_normal, 
+                     size = 1.5)
       xLabsLength <- sum(nchar(unique(as.character(answers$subgroup))))},
     `Multiple Response Block` = {
-      plt <- ggplot(answers, aes(x = response, fill = subgroup)) + 
-        geom_bar(position = "dodge")},
-    {plt <- ggplot(answers, aes(x = response)) + geom_bar()
-    if("ordered" %in% class(answers$response)) plt <- plt + 
-        scale_x_discrete(limits = levels(answers$response))})
+#       answers %>% group_by(subgroup, response, sampSize) %>%
+#         summarise(count = n()) %>% 
+#         mutate(prop = count/sampSize, upr = binom.test(count, sampSize)$conf.int[2],
+#                lwr = binom.test(count, sampSize)$conf.int[1]) -> 
+#         d
+      plt <- ggplot(answerProportions, aes(x = response, fill = subgroup, y = prop,
+                           ymax = upr, ymin = lwr)) +
+        geom_bar(stat = "identity", position = "dodge")
+      if(pop.estimates) plt <- plt + 
+        geom_errorbar(aes(color= `Population Estimates`),
+                      position = "dodge", size = 1.5)},
+    {if(is.ordered(answers$response) || is.numeric(answers$response)) plt <-
+        ggplot(answers, aes(x = response)) + geom_bar()
+      if(pop.estimates) plt <- plt +
+          geom_errorbarh(
+            aes(y = -.05, x = mean(as.numeric(response)), 
+                xmin = t.test(as.numeric(response))$conf.int[1],
+                xmax = t.test(as.numeric(response))$conf.int[2],
+                color = "Mean and 95% CI"),
+            height = 0, size = 1.5) +
+          geom_point(aes(y = -.05, x = mean(as.numeric(response)), 
+                         color = "Mean and 95% CI"), size = 4) else plt <-
+        ggplot(answerProportions, aes())
+          
+    if(is.ordered(answers$response)) plt <- plt + 
+        scale_x_discrete(limits = levels(answers$response))
+
+      })
   s <- unique(answers$subgroup)
   if(length(s) == 1 && !is.na(s[1])) 
     title <- paste0(title, s[1], collapse = " ")
@@ -100,8 +131,8 @@ plotQuestion <- function(answers, title, outputFolder = character(0)) {
     plt <- plt + theme(plot.title = element_text(size = 10))
   if(xLabsLength > 50) 
     plt <- plt + theme(axis.text.x = element_text(angle = 6, vjust = .75, hjust = .5))
-  print(plt)
-  if(length(outputFolder)) dev.off()
+  #print(plt)
+  #if(length(outputFolder)) dev.off()
   plt
 }
 
