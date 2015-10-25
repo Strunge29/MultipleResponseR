@@ -24,27 +24,23 @@ multipleResponsePlot <- function(responses, categories) {
 
 explorePlots <- function(dat, scales, outputFolder = character(0)) {
   #todo, check structure (maybe S3 class?)
-  dat <- dat %>% mutate(sampSize = length(unique(RespondentID))) %>%
-    filter(type != "Free Text") 
-    
-
-  invisible(lapply(split(dat, list(dat$question, dat$type), drop = T), 
+  dat <- dat %>% filter(type != "Free Text") 
+  lapply(split(dat, list(dat$question, dat$type), drop = T), 
                    function(answers) {
     scale <- which(sapply(scales, function(x)all(answers$response %in% x)))
     if(length(scale) == 1) answers$response <- 
-        ordered(answers$response, levels = scales[[scale]]) else if(length(scale) > 1)
-          warning("Multiple scales matched to responses for '", 
-                  dat$question[1], 
-                  "'. Plotting as discrete/nominal responses. If ordinal is desired, ensure all items in exactly one scale match to responses for this question.")
+        ordered(answers$response, levels = scales[[scale]]) else 
+          if(length(scale) > 1)
+            warning("Multiple scales matched to responses for '", 
+                    dat$question[1], 
+                    "'. Plotting as discrete/nominal responses. If ordinal is desired, ensure all items in exactly one scale match to responses for this question.")
     n <- suppressWarnings(as.numeric(as.character(answers$response)))
     if(!anyNA(n)) answers$response <- n
-    plotQuestion(answers, as.character(answers$question[1]), outputFolder)
-  }))
-  
+    plotQuestion(answers)
+  }) %>% invisible
 }
 #TODO: extract the file creation to seperate method (maybe S3 print method)
-plotQuestion <- function(answers, title, outputFolder = character(0), 
-                         pop.estimates = T) {
+plotQuestion <- function(answers, pop.estimates = T) {
   t <- as.character(unique(answers$type))
   if (length(t) > 1) stop("Unable to plot question block with multiple response types")
 #   if(length(outputFolder)) {
@@ -58,88 +54,116 @@ plotQuestion <- function(answers, title, outputFolder = character(0),
 #     png(fname, height = 600, width = 800)
 #   }
 
-  xLabsLength <- sum(nchar(unique(as.character(answers$response))))
-  ylab <- "Count"
-  xlab <- "Response" 
-  `Population Estimates` <- "Mean and\n95% Confidence Interval"
+  #xLabsLength <- sum(nchar(unique(as.character(answers$response))))
+  switch(t,
+         `Response Block` = 
+         {responseBlockPlot(answers, pop.estimates)},
+         `Multiple Response Block` = 
+         {multipleResponseBlockPlot(answers, pop.estimates)},
+         {singleQuestionPlot(answers, pop.estimates)})
+}
+
+convertResponsesToProportions <- function(answers) {
+  if(is.null(answers$sampSize)) answers <- 
+      mutate(answers, sampSize = length(unique(RespondentID)))
   answers %>% group_by(subgroup, response, sampSize) %>%
     summarise(count = n()) %>% 
-    mutate(prop = count/sampSize) -> 
-    answerProportions 
-  if(pop.estimates) answerProportions <- 
-    mutate(answerProportions, 
+    mutate(prop = count/sampSize,
            upr = binom.test(count, sampSize)$conf.int[2],
            lwr = binom.test(count, sampSize)$conf.int[1])
-    switch(
-    t,
-    `Response Block` = {
-      ylab <- "Response"
-      xlab <- "Item" 
-      ratio <- max(table(answers$response, answers$subgroup)) *
-               length(levels(factor(answers$subgroup)))
-      ratio <- pmin(1, 1 - (ratio - 15)/(ratio + 30))
-      plt <- ggplot(answers, aes(x = subgroup, y = as.numeric(response))) +
-        geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 1, 
-                     dotsize = .1, stackratio = ratio) +
-        scale_y_discrete(limits = levels(answers$response))
-      if(pop.estimates && is.ordered(answers$response)) plt <- plt +
-        stat_summary(aes(color = `Population Estimates`), 
-                     fun.data = mean_cl_normal, 
-                     size = 1.5)
-      xLabsLength <- sum(nchar(unique(as.character(answers$subgroup))))},
-    `Multiple Response Block` = {
-#       answers %>% group_by(subgroup, response, sampSize) %>%
-#         summarise(count = n()) %>% 
-#         mutate(prop = count/sampSize, upr = binom.test(count, sampSize)$conf.int[2],
-#                lwr = binom.test(count, sampSize)$conf.int[1]) -> 
-#         d
-      plt <- ggplot(answerProportions, aes(x = response, fill = subgroup, y = prop,
-                           ymax = upr, ymin = lwr)) +
-        geom_bar(stat = "identity", position = "dodge")
-      if(pop.estimates) plt <- plt + 
-        geom_errorbar(aes(color= `Population Estimates`),
-                      position = "dodge", size = 1.5)},
-    {if(is.ordered(answers$response) || is.numeric(answers$response)) plt <-
-        ggplot(answers, aes(x = response)) + geom_bar()
-      if(pop.estimates) plt <- plt +
-          geom_errorbarh(
-            aes(y = -.05, x = mean(as.numeric(response)), 
-                xmin = t.test(as.numeric(response))$conf.int[1],
-                xmax = t.test(as.numeric(response))$conf.int[2],
-                color = "Mean and 95% CI"),
-            height = 0, size = 1.5) +
-          geom_point(aes(y = -.05, x = mean(as.numeric(response)), 
-                         color = "Mean and 95% CI"), size = 4) else plt <-
-        ggplot(answerProportions, aes())
-          
-    if(is.ordered(answers$response)) plt <- plt + 
-        scale_x_discrete(limits = levels(answers$response))
+}
 
-      })
+responseBlockPlot <- function(answers, pop.estimates = T, dotRatioFactor = 15) {
+  ratio <- max(table(answers$response, answers$subgroup)) *
+    length(levels(factor(answers$subgroup)))
+  ratio <- pmin(1, 1 - (ratio - dotRatioFactor)/(ratio + dotRatioFactor*2))
+  plt <- ggplot(answers, aes(x = subgroup, y = as.numeric(response))) +
+    geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 1, 
+                 dotsize = .1, stackratio = ratio) +
+    scale_y_discrete(limits = levels(answers$response)) + 
+    labs(x = "Item", y = "Response")
+  if(pop.estimates) {
+    if(is.ordered(answers$response)) plt <- plt +
+        stat_summary(aes(color = "Mean and\n95% Confidence Interval"), 
+                     fun.data = mean_cl_normal, size = 1.5)  +
+        scale_color_manual(name = "Population Estimates", values = "grey50")
+    #TODO: add population estimates for nominal data
+  }
+  tweakPlotDisplay(answers, plt, xAxisTextField = "subgroup")
+}
+
+multipleResponseBlockPlot <- function(answers, pop.estimates = T) {
+  plt <- ggplot(convertResponsesToProportions(answers), 
+                aes(x = response, fill = subgroup, y = prop,
+                                       ymax = upr, ymin = lwr)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    labs(x = "Response", y = "Proportion")
+  if(pop.estimates) plt <- plt + 
+      geom_errorbar(aes(color= "95% Confidence Interval\nof the Proportion"),
+                    position = "dodge") + 
+      scale_color_manual(name = "Population Estimates", values = "grey50")
+  tweakPlotDisplay(answers, plt, xAxisTextField = "response")
+}
+
+singleQuestionPlot <- function(answers, pop.estimates = T) {
+  if(is.ordered(answers$response) || is.numeric(answers$response)) {
+    plt <- ggplot(answers, aes(x = response)) + geom_bar() +
+      labs(x = "Response", y = "Count")
+    if(pop.estimates) plt <- plt +
+        geom_errorbarh(
+          aes(y = -.05, x = mean(as.numeric(response)), 
+              xmin = t.test(as.numeric(response))$conf.int[1],
+              xmax = t.test(as.numeric(response))$conf.int[2],
+              color = "Mean and\n95% Confidence Interval"),
+          height = 0, size = 3) +
+        geom_point(aes(y = -.05, x = mean(as.numeric(response)), 
+                       color = "Mean and\n95% Confidence Interval"), size = 8) +
+        scale_color_manual(name = "Population Estimates", values = "grey50")
+    } else {
+      plt <- ggplot(convertResponsesToProportions(answers), 
+                    aes(x = response, y = prop,
+                        ymax = upr, ymin = lwr)) +
+        geom_bar(stat = "identity") + 
+        labs(x = "Response", y = "Proportion")
+      if(pop.estimates) plt <- plt + 
+          geom_errorbar(aes(color= "95% Confidence Interval\nof the Proportion"),
+                        width = .5) +
+          scale_color_manual(name = "Population Estimates", values = "grey50")
+      }               
+  if(is.ordered(answers$response)) plt <- plt + 
+      scale_x_discrete(limits = levels(answers$response))
+  tweakPlotDisplay(
+    answers, plt,
+    xAxisTextField = ifelse(is.numeric(answers$response), NA, "response"))
+}
+
+tweakPlotDisplay <- function(answers, plt, xAxisTextField) {
+  title <- as.character(answers$question[1])
   s <- unique(answers$subgroup)
   if(length(s) == 1 && !is.na(s[1])) 
     title <- paste0(title, s[1], collapse = " ")
-  if(nchar(title) > 118) {
-    spaces <- gregexpr(" ", title)[[1]]
-    pos <- spaces[which.min(abs(spaces - nchar(title)/2))]
-    substr(title, pos, pos) <- "\n"
-  }
-  plt <- plt + 
-    labs(title= title, x = xlab, y = ylab) + 
-    theme_classic()
+  title <- breakStrings(title, 75)
+  plt <- plt + ggtitle(title) + theme_classic() + theme(legend.position = "bottom")
   if(nchar(title) > 250) plt <- plt + theme(plot.title = element_text(size = 8)) else
     plt <- plt + theme(plot.title = element_text(size = 10))
-  if(xLabsLength > 50) 
+  xTextLen <- sum(nchar(unique(as.character(answers[[xAxisTextField]]))))
+  if(xTextLen > 150) {
+    lvls <- answers[[xAxisTextField]]
+    if(is.ordered(lvls)) lvls <- as.character(levels(lvls)) else
+      lvls <- as.character(unique(lvls))
+    plt <- plt + coord_flip() + 
+      scale_x_discrete(limits = lvls, labels = breakStrings(lvls, 35))
+  } else if(xTextLen > 75) {
     plt <- plt + theme(axis.text.x = element_text(angle = 6, vjust = .75, hjust = .5))
-  #print(plt)
-  #if(length(outputFolder)) dev.off()
+  }
   plt
 }
 
-breakStrings <- function(x) {
+breakStrings <- function(x, cutoff = 118) {
   spaces <- gregexpr(" ", x)
   pos <- mapply(function(y, mid){y[which.min(abs(y - mid))]},
                 y = spaces, mid = nchar(x)/2)
-  substr(x, pos, pos) <- "\n"
-  x
+  x2 <- x
+  substr(x2, pos, pos) <- "\n"
+  ifelse(nchar(x) > cutoff, x2, x)
 }
