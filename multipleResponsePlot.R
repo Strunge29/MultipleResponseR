@@ -24,7 +24,8 @@ multipleResponsePlot <- function(responses, categories) {
 
 explorePlots <- function(dat, scales, outputFolder = character(0)) {
   #todo, check structure (maybe S3 class?)
-  dat <- dat %>% filter(type != "Free Text") 
+  dat <- dat %>% mutate(sampSize = length(unique(RespondentID))) %>% 
+    filter(type != "Free Text") 
   lapply(split(dat, list(dat$question, dat$type), drop = T), 
                    function(answers) {
     scale <- which(sapply(scales, function(x)all(answers$response %in% x)))
@@ -35,7 +36,10 @@ explorePlots <- function(dat, scales, outputFolder = character(0)) {
                     dat$question[1], 
                     "'. Plotting as discrete/nominal responses. If ordinal is desired, ensure all items in exactly one scale match to responses for this question.")
     n <- suppressWarnings(as.numeric(as.character(answers$response)))
-    if(!anyNA(n)) answers$response <- n
+    if(!anyNA(n)) { 
+      answers$response <- n
+      answers$type <- "Numeric Entry"
+    }
     plotQuestion(answers)
   }) %>% invisible
 }
@@ -60,7 +64,9 @@ plotQuestion <- function(answers, pop.estimates = T) {
          {responseBlockPlot(answers, pop.estimates)},
          `Multiple Response Block` = 
          {multipleResponseBlockPlot(answers, pop.estimates)},
-         {singleQuestionPlot(answers, pop.estimates)})
+         `Single Question` = {singleQuestionPlot(answers, pop.estimates)},
+         `Numeric Entry` = {numericEntryPlot(answers, pop.estimates)},
+         `Multiple Response Question` = {multipleResponseQuestionPlot(answers, pop.estimates)})
 }
 
 convertResponsesToProportions <- function(answers) {
@@ -77,6 +83,7 @@ responseBlockPlot <- function(answers, pop.estimates = T, dotRatioFactor = 15) {
   ratio <- max(table(answers$response, answers$subgroup)) *
     length(levels(factor(answers$subgroup)))
   ratio <- pmin(1, 1 - (ratio - dotRatioFactor)/(ratio + dotRatioFactor*2))
+  #TODO will this ggplot call work with nominal data? Is the as.numeric call necessary for ordinal data?
   plt <- ggplot(answers, aes(x = subgroup, y = as.numeric(response))) +
     geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 1, 
                  dotsize = .1, stackratio = ratio) +
@@ -105,20 +112,58 @@ multipleResponseBlockPlot <- function(answers, pop.estimates = T) {
   tweakPlotDisplay(answers, plt, xAxisTextField = "response")
 }
 
-singleQuestionPlot <- function(answers, pop.estimates = T) {
-  if(is.ordered(answers$response) || is.numeric(answers$response)) {
-    plt <- ggplot(answers, aes(x = response)) + geom_bar() +
-      labs(x = "Response", y = "Count")
-    if(pop.estimates) plt <- plt +
-        geom_errorbarh(
-          aes(y = -.05, x = mean(as.numeric(response)), 
-              xmin = t.test(as.numeric(response))$conf.int[1],
-              xmax = t.test(as.numeric(response))$conf.int[2],
-              color = "Mean and\n95% Confidence Interval"),
-          height = 0, size = 3) +
-        geom_point(aes(y = -.05, x = mean(as.numeric(response)), 
-                       color = "Mean and\n95% Confidence Interval"), size = 8) +
+multipleResponseQuestionPlot <- function(answers, pop.estimates = T) {
+  plt <- ggplot(convertResponsesToProportions(answers), 
+                aes(x = response, y = prop,
+                    ymax = upr, ymin = lwr)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    labs(x = "Response", y = "Proportion")
+  if(pop.estimates) plt <- plt + 
+      geom_errorbar(aes(color= "95% Confidence Interval\nof the Proportion"),
+                    position = "dodge", width = .5) + 
+      scale_color_manual(name = "Population Estimates", values = "grey50")
+  tweakPlotDisplay(answers, plt, xAxisTextField = "response")
+}
+
+numericEntryPlot <- function(answers, pop.estimates = T) {
+  plt <- ggplot(answers, aes(x = response)) + geom_bar(position = "dodge") +
+    labs(x = "Response", y = "Count")
+  if(pop.estimates) plt <- plt +
+      geom_errorbarh(
+        aes(y = -.05, x = mean(response), 
+            xmin = t.test(response)$conf.int[1],
+            xmax = t.test(response)$conf.int[2],
+            color = "Mean and\n95% Confidence Interval"),
+        height = 0, size = 3) +
+      geom_point(aes(y = -.05, x = mean(response), 
+                     color = "Mean and\n95% Confidence Interval"), size = 8) +
+      scale_color_manual(name = "Population Estimates", values = "grey50")
+  tweakPlotDisplay(answers, plt, xAxisTextField = NA)
+}
+
+numericBlockPlot <- function(answers, pop.estimates = T, dotRatioFactor = 30, 
+                             nBins = 30, summaryFun = mean_cl_boot) {
+  ratio <- max(tabulate(cut(answers$response, nBins))) *
+    length(levels(factor(answers$subgroup)))
+  ratio <- pmin(1, 1 - (ratio - dotRatioFactor)/(ratio + dotRatioFactor*2))
+  plt <- ggplot(answers, aes(x = subgroup, y = response)) +
+    geom_dotplot(binaxis = "y", stackdir = "center", 
+                 dotsize = 1, stackratio = ratio) +
+    labs(x = "Item", y = "Response")
+  if(pop.estimates) {
+    plt <- plt +
+        stat_summary(aes(color = "Mean and\n95% Confidence Interval"), 
+                     fun.data = summaryFun, size = .75)  +
         scale_color_manual(name = "Population Estimates", values = "grey50")
+  }
+  tweakPlotDisplay(answers, plt, xAxisTextField = "subgroup")  
+}
+
+singleQuestionPlot <- function(answers, pop.estimates = T) {
+  if(is.ordered(answers$response)) {
+    plt <- mutate(answers, response = as.numeric(response)) %>%  
+      numericEntryPlot(pop.estimates)
+    plt <- plt + scale_x_discrete(limits = levels(answers$response))
     } else {
       plt <- ggplot(convertResponsesToProportions(answers), 
                     aes(x = response, y = prop,
@@ -130,11 +175,8 @@ singleQuestionPlot <- function(answers, pop.estimates = T) {
                         width = .5) +
           scale_color_manual(name = "Population Estimates", values = "grey50")
       }               
-  if(is.ordered(answers$response)) plt <- plt + 
-      scale_x_discrete(limits = levels(answers$response))
-  tweakPlotDisplay(
-    answers, plt,
-    xAxisTextField = ifelse(is.numeric(answers$response), NA, "response"))
+
+  tweakPlotDisplay(answers, plt, xAxisTextField = "response")
 }
 
 tweakPlotDisplay <- function(answers, plt, xAxisTextField) {
