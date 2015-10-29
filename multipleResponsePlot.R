@@ -125,19 +125,24 @@ multipleResponseQuestionPlot <- function(answers, pop.estimates = T) {
   tweakPlotDisplay(answers, plt, xAxisTextField = "response")
 }
 
-numericEntryPlot <- function(answers, pop.estimates = T) {
+numericEntryPlot <- function(answers, pop.estimates = T,
+                             summaryFun = ifelse(nrow(answers) > 4, smean.cl.normal, smean.cl.boot)) {
+  if(length(unique(answers$subgroup)) > 1) return(numericBlockPlot(answers, pop.estimates))
   plt <- ggplot(answers, aes(x = response)) + geom_bar(position = "dodge") +
     labs(x = "Response", y = "Count")
-  if(pop.estimates) plt <- plt +
+  if(pop.estimates) {
+    est <- do.call(summaryFun, list(answers$response))
+    plt <- plt +
       geom_errorbarh(
-        aes(y = -.05, x = mean(response), 
-            xmin = t.test(response)$conf.int[1],
-            xmax = t.test(response)$conf.int[2],
+        aes_q(y = -.05, x = unname(est[1]), 
+            xmin = unname(est[2]),
+            xmax = unname(est[3]),
             color = "Mean and\n95% Confidence Interval"),
         height = 0, size = 3) +
       geom_point(aes(y = -.05, x = mean(response), 
                      color = "Mean and\n95% Confidence Interval"), size = 8) +
       scale_color_manual(name = "Population Estimates", values = "grey50")
+  }
   tweakPlotDisplay(answers, plt, xAxisTextField = NA)
 }
 
