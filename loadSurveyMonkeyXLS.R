@@ -55,11 +55,13 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
   # Free text answers selected as those where every anser is unique, not a
   # number, and not part of a multiple response block (which would match if only
   # one non-missing answer was present)
-  qProps %<>% mutate(others = (uniqueAnswers & !(multiBlockItems | numbers)) |
-                       header2 == "Open-Ended Response")
+  qProps %<>% mutate(trueOthers = header2 == "Open-Ended Response" | 
+                       grepl("please specify", header2, ignore.case = T),
+                     likelyOthers = (uniqueAnswers & !(multiBlockItems | numbers)),
+                     others = trueOthers | likelyOthers)
   
   # ID single item responses to ignore extra header level when naming question
-  qProps %>% filter(!others) %>% magrittr::extract2("header") %>% table %>%
+  qProps %>% filter(!trueOthers) %>% magrittr::extract2("header") %>% table %>%
     magrittr::extract(. == 1) %>% names ->
     singles
   qProps %<>% mutate(singletons = header %in% singles)
@@ -93,28 +95,28 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
     if(sum(qProps[colNames, "lonely"]) > 1) return("lonelyBlock")
     "block"
   })
-  qProps %<>% mutate(multiBlock = blockType[header] == "multiBlock",
-                     multiMatrix = blockType[header] == "multiMatrix",
-                     numericBlock = blockType[header] == "numericBlock",
-                     block = blockType[header] == "block",
-                     blockExtra = ((multiBlock & !multiBlockItems) | 
-                       (multiMatrix &  !multiMatrixItems)) & !empty)
+  qProps %<>% mutate(blockType = blockType[header])
+  qProps %<>% mutate(#multiBlock = blockType[header] == "multiBlock",
+                     #multiMatrix = blockType[header] == "multiMatrix",
+                     #numericBlock = blockType[header] == "numericBlock",
+                     #block = blockType[header] == "block",
+                     blockExtra = ((blockType == "multiBlock" & !multiBlockItems) | 
+                       (blockType == "multiMatrix" &  !multiMatrixItems)) & !empty)
   # item labels for single response (radio button) matrices
-  qProps %<>% mutate(subgroup = ifelse(multiBlock | singletons, NA, header2))
-  #TODO id blocks of numeric type questions, "Numeric Block"
+  qProps %<>% mutate(subgroup = ifelse(blockType == "multiBlock" | singletons, NA, header2))
 #   qProps %<>% mutate(type  = ifelse(singletons, "Single Question", "Response Block")) %>% 
 #     mutate(type = ifelse(multiBlock, "Multiple Response Question", type)) %>%
 #     mutate(type = ifelse(multiMatrix, "Multiple Response Block", type)) %>%
 #     mutate(type = ifelse(numbers, "Numeric Entry", type)) %>%
 #     mutate(type = ifelse(others, "Free Text", type))
   qProps %<>% mutate(type  = ifelse(singletons, "Single Question", "Response Block")) %>% 
-    #mutate(type = ifelse(block, , type)) %>%
+    #mutate(type = ifelse(blockType == "lonelyBlock", , type)) %>%
     #mutate(type = ifelse(empty, "Empty", type)) %>%
-    mutate(type = ifelse(multiBlock, "Multiple Response Question", type)) %>%
-    mutate(type = ifelse(multiMatrix, "Multiple Response Block", type)) %>%
+    mutate(type = ifelse(blockType == "multiBlock", "Multiple Response Question", type)) %>%
+    mutate(type = ifelse(blockType == "multiMatrix", "Multiple Response Block", type)) %>%
     mutate(type = ifelse(others | blockExtra, "Free Text", type)) %>%
     mutate(type = ifelse(numbers, "Numeric Entry", type)) %>%
-    mutate(type = ifelse(numericBlock, "Numeric Block", type)) 
+    mutate(type = ifelse(blockType == "numericBlock", "Numeric Block", type)) 
     #mutate(type = ifelse(block & lonely, "Response Block", type))
   
     
@@ -130,7 +132,7 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
   dat$type <- as.factor(qProps[dat$question, "type"])
   #tweak MR matrix questions because the true response of value is in the 2nd level header
   #TODO make option to swap first and second regmatches for group/value
-  multimatrices <- qProps$multiMatrix & !qProps$others
+  multimatrices <- qProps$type == "Multiple Response Block" #qProps$multiMatrix & !qProps$others
   if(any(multimatrices)) {
     key <- regexec("(.+) - (.+)", qProps[multimatrices, "header2"]) %>% 
       regmatches(x = qProps[multimatrices, "header2"]) %>% 
