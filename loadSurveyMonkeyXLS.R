@@ -6,7 +6,7 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
   for(i in seq_len(length(header)-1)) if(header[i+1] == " ") header[i+1] <- header[i]
   #load in with unaltered column names to capture second level headers
   dat <- read.xlsx2(fname, sheetIndex = 1, startRow = 2, check.names = F)
-  print("files loaded")
+
   #data frame to hold various properties learned about each question
   #starting with first and second level headers
   qProps <- data.frame(header = factor(header), 
@@ -69,24 +69,6 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
   colNameGroups <- split(qProps$varNames, qProps$header)
   row.names(qProps) <- qProps$varNames
 
-#   isMultiBlock <- sapply(colNameGroups, function(colNames) {
-#     if(length(colNames) < 2) return(F)
-#     any(qProps[colNames, "multiBlockItems"]) #&& 
-# #        all(qProps[colNames, "empty"] | 
-# #              qProps[colNames, "multiBlockItems"] | 
-# #              qProps[colNames, "others"])
-#   })
-#   isMultiMatrix <- sapply(colNameGroups, function(colNames) {
-#     if(length(colNames) < 2) return(F)
-#     any(qProps[colNames, "multiMatrixItems"]) #&& 
-# #       all(qProps[colNames, "empty"] | 
-# #             qProps[colNames, "multiMatrixItems"] | 
-# #             qProps[colNames, "others"])
-#   })
-# #   isBlock <- sapply(colNameGroups, function(colNames) {
-# #     if(length(colNames) < 2) return(F)
-# #     T
-# #   })
   blockType <- sapply(colNameGroups, function(colNames) {
     if(length(colNames) < 2) return("")
     if(any(qProps[colNames, "multiBlockItems"])) return("multiBlock")
@@ -104,11 +86,7 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
                        (blockType == "multiMatrix" &  !multiMatrixItems)) & !empty)
   # item labels for single response (radio button) matrices
   qProps %<>% mutate(subgroup = ifelse(blockType == "multiBlock" | singletons, NA, header2))
-#   qProps %<>% mutate(type  = ifelse(singletons, "Single Question", "Response Block")) %>% 
-#     mutate(type = ifelse(multiBlock, "Multiple Response Question", type)) %>%
-#     mutate(type = ifelse(multiMatrix, "Multiple Response Block", type)) %>%
-#     mutate(type = ifelse(numbers, "Numeric Entry", type)) %>%
-#     mutate(type = ifelse(others, "Free Text", type))
+
   qProps %<>% mutate(type  = ifelse(singletons, "Single Question", "Response Block")) %>% 
     #mutate(type = ifelse(blockType == "lonelyBlock", , type)) %>%
     #mutate(type = ifelse(empty, "Empty", type)) %>%
