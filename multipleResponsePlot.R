@@ -69,14 +69,27 @@ plotQuestion <- function(answers, pop.estimates = T) {
          `Multiple Response Question` = {multipleResponseQuestionPlot(answers, pop.estimates)})
 }
 
-convertResponsesToProportions <- function(answers) {
+convertResponsesToProportions <- function(answers, factor = NA) {
+#   if(is.null(answers$sampSize)) answers <- 
+#       mutate(answers, sampSize = length(unique(RespondentID)))
+  vectorizeBinomInt <- function(counts, sizes, which) {
+    mapply(function(c,s,w) binom.test(c, s)$conf.int[w],
+           c = counts, s = sizes, MoreArgs = list(w = which))
+  }
+  answers <- ensureSampleSizeAvailable(answers)
+  grps <- list("sampSize", "subgroup", "response")
+  if(!is.na(factor)) grps <- c(as.character(factor), grps)
+  answers %>% group_by_(.dots = grps) %>%
+    summarise(count = n()) %>% 
+     mutate(prop = count/sampSize,
+            upr = vectorizeBinomInt(count, sampSize, 2),
+            lwr = vectorizeBinomInt(count, sampSize, 1))
+}
+
+ensureSampleSizeAvailable <- function(answers) {
   if(is.null(answers$sampSize)) answers <- 
       mutate(answers, sampSize = length(unique(RespondentID)))
-  answers %>% group_by(subgroup, response, sampSize) %>%
-    summarise(count = n()) %>% 
-    mutate(prop = count/sampSize,
-           upr = binom.test(count, sampSize)$conf.int[2],
-           lwr = binom.test(count, sampSize)$conf.int[1])
+  answers
 }
 
 responseBlockPlot <- function(answers, pop.estimates = T, dotRatioFactor = 15) {
@@ -112,16 +125,26 @@ multipleResponseBlockPlot <- function(answers, pop.estimates = T) {
   tweakPlotDisplay(answers, plt, xAxisTextField = "response")
 }
 
-multipleResponseQuestionPlot <- function(answers, pop.estimates = T) {
-  plt <- ggplot(convertResponsesToProportions(answers), 
-                aes(x = response, y = prop,
-                    ymax = upr, ymin = lwr)) +
+multipleResponseQuestionPlot <- function(..., pop.estimates = T) {
+  dataList <- list(...)
+  multiData <- length(dataList) > 1
+  if(multiData){
+    dataList <- lapply(dataList, ensureSampleSizeAvailable)
+    #TODO: rather than suppress all warnings, preconvert factors
+    suppressWarnings(answers <- bind_rows(dataList, .id = "Survey"))
+  }  else answers <- dataList[[1]]
+  plt <- ggplot(
+    convertResponsesToProportions(answers, ifelse(multiData, "Survey", NA)), 
+    aes(x = response, y = prop,
+        ymax = upr, ymin = lwr)) +
     geom_bar(stat = "identity", position = "dodge") +
     labs(x = "Response", y = "Proportion")
   if(pop.estimates) plt <- plt + 
       geom_errorbar(aes(color= "95% Confidence Interval\nof the Proportion"),
-                    position = "dodge", width = .5) + 
+                    position = position_dodge(width = .885), width = .5) + 
       scale_color_manual(name = "Population Estimates", values = "grey50")
+  if(multiData) plt <- plt + aes(fill = Survey)
+  
   tweakPlotDisplay(answers, plt, xAxisTextField = "response")
 }
 
