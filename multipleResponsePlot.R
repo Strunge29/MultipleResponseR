@@ -22,10 +22,10 @@ multipleResponsePlot <- function(responses, categories) {
   
 }
 
-explorePlots <- function(dat, scales, outputFolder = character(0)) {
+explorePlots <- function(..., scales, outputFolder = character(0)) {
   #todo, check structure (maybe S3 class?)
-  dat <- dat %>% mutate(sampSize = length(unique(RespondentID))) %>% 
-    filter(type != "Free Text") 
+  dat <- combineSurveyData(...)
+  dat <- dat %>% filter(type != "Free Text") 
   lapply(split(dat, list(dat$questionId, dat$type), drop = T), 
                    function(answers) {
     scale <- which(sapply(scales, function(x)all(answers$response %in% x)))
@@ -67,6 +67,17 @@ plotQuestion <- function(answers, pop.estimates = T) {
          `Single Question` = {singleQuestionPlot(answers, pop.estimates)},
          `Numeric Entry` = {numericEntryPlot(answers, pop.estimates)},
          `Multiple Response Question` = {multipleResponseQuestionPlot(answers, pop.estimates)})
+}
+
+combineSurveyData <- function(...) {
+  dataList <- list(...)
+  if(length(dataList) > 1){
+    #TODO: match questions between surveys, beware duplicate names
+    dataList <- lapply(dataList, ensureSampleSizeAvailable)
+    #TODO: rather than suppress all warnings, preconvert factors
+    suppressWarnings(answers <- bind_rows(dataList, .id = "Survey"))
+  }  else answers <- dataList[[1]]
+  answers
 }
 
 convertResponsesToProportions <- function(answers, factor = NA) {
@@ -125,16 +136,16 @@ multipleResponseBlockPlot <- function(answers, pop.estimates = T) {
   tweakPlotDisplay(answers, plt, xAxisTextField = "response")
 }
 
-multipleResponseQuestionPlot <- function(..., pop.estimates = T) {
-  dataList <- list(...)
-  multiData <- length(dataList) > 1
-  if(multiData){
-    dataList <- lapply(dataList, ensureSampleSizeAvailable)
-    #TODO: rather than suppress all warnings, preconvert factors
-    suppressWarnings(answers <- bind_rows(dataList, .id = "Survey"))
-  }  else answers <- dataList[[1]]
+multipleResponseQuestionPlot <- function(answers, splitBy = NA, pop.estimates = T) {
+#   dataList <- list(...)
+#   multiData <- length(dataList) > 1
+#   if(multiData){
+#     dataList <- lapply(dataList, ensureSampleSizeAvailable)
+#     #TODO: rather than suppress all warnings, preconvert factors
+#     suppressWarnings(answers <- bind_rows(dataList, .id = "Survey"))
+#   }  else answers <- dataList[[1]]
   plt <- ggplot(
-    convertResponsesToProportions(answers, ifelse(multiData, "Survey", NA)), 
+    convertResponsesToProportions(answers, splitBy), 
     aes(x = response, y = prop,
         ymax = upr, ymin = lwr)) +
     geom_bar(stat = "identity", position = "dodge") +
@@ -143,7 +154,7 @@ multipleResponseQuestionPlot <- function(..., pop.estimates = T) {
       geom_errorbar(aes(color= "95% Confidence Interval\nof the Proportion"),
                     position = position_dodge(width = .885), width = .5) + 
       scale_color_manual(name = "Population Estimates", values = "grey50")
-  if(multiData) plt <- plt + aes(fill = Survey)
+  if(!is.na(splitBy)) plt <- plt + aes(fill = Survey)
   
   tweakPlotDisplay(answers, plt, xAxisTextField = "response")
 }
