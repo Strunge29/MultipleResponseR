@@ -61,12 +61,13 @@ plotQuestion <- function(answers, pop.estimates = T) {
   #xLabsLength <- sum(nchar(unique(as.character(answers$response))))
   switch(t,
          `Response Block` = 
-         {responseBlockPlot(answers, pop.estimates)},
+         {responseBlockPlot(answers, pop.estimates = pop.estimates)},
          `Multiple Response Block` = 
-         {multipleResponseBlockPlot(answers, pop.estimates)},
-         `Single Question` = {singleQuestionPlot(answers, pop.estimates)},
-         `Numeric Entry` = {numericEntryPlot(answers, pop.estimates)},
-         `Multiple Response Question` = {multipleResponseQuestionPlot(answers, pop.estimates)})
+         {multipleResponseBlockPlot(answers,  pop.estimates = pop.estimates)},
+         `Single Question` = {singleQuestionPlot(answers,  pop.estimates = pop.estimates)},
+         `Numeric Entry` = {numericEntryPlot(answers,  pop.estimates = pop.estimates)},
+         `Multiple Response Question` = {multipleResponseQuestionPlot(answers,  pop.estimates = pop.estimates)},
+         `Numeric Block` = {numericBlockPlot(answers,  pop.estimates = pop.estimates)})
 }
 
 convertResponsesToProportions <- function(answers) {
@@ -127,7 +128,6 @@ multipleResponseQuestionPlot <- function(answers, pop.estimates = T) {
 
 numericEntryPlot <- function(answers, pop.estimates = T,
                              summaryFun = ifelse(nrow(answers) > 4, smean.cl.normal, smean.cl.boot)) {
-  if(length(unique(answers$subgroup)) > 1) return(numericBlockPlot(answers, pop.estimates))
   plt <- ggplot(answers, aes(x = response)) + geom_bar(position = "dodge") +
     labs(x = "Response", y = "Count")
   if(pop.estimates) {
