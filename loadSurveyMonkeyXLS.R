@@ -68,10 +68,10 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
                      others = trueOthers | likelyOthers)
   
   # ID single item responses to ignore extra header level when naming question
-  qProps %>% filter(!trueOthers) %>% magrittr::extract2("header") %>% table %>%
+  qProps %>% filter(!trueOthers) %>% magrittr::extract2("questionId") %>% table %>%
     magrittr::extract(. == 1) %>% names ->
     singles
-  qProps %<>% mutate(singletons = header %in% singles)
+  qProps %<>% mutate(singletons = questionId %in% singles)
   
   colNameGroups <- split(qProps$varNames, qProps$questionId)
   row.names(qProps) <- qProps$varNames
@@ -84,7 +84,7 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
     if(sum(qProps[colNames, "lonely"]) > 1) return("lonelyBlock")
     "block"
   })
-  qProps %<>% mutate(blockType = blockType[header])
+  qProps %<>% mutate(blockType = blockType[questionId])
   qProps %<>% mutate(blockExtra = ((blockType == "multiBlock" & !multiBlockItems) | 
                        (blockType == "multiMatrix" &  !multiMatrixItems)) & !empty)
   # item labels for single response (radio button) matrices
