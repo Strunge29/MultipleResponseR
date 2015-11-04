@@ -26,7 +26,7 @@ explorePlots <- function(dat, scales, outputFolder = character(0)) {
   #todo, check structure (maybe S3 class?)
   dat <- dat %>% mutate(sampSize = length(unique(RespondentID))) %>% 
     filter(type != "Free Text") 
-  lapply(split(dat, list(dat$question, dat$type), drop = T), 
+  lapply(split(dat, list(dat$questionId, dat$type), drop = T), 
                    function(answers) {
     scale <- which(sapply(scales, function(x)all(answers$response %in% x)))
     if(length(scale) == 1) answers$response <- 

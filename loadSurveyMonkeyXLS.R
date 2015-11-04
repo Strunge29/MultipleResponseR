@@ -3,14 +3,24 @@ library(xlsx); library(dplyr); library(tidyr); library(ggplot2); library(magritt
 loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
   header <- names(read.xlsx2(fname, sheetIndex = 1, endRow = 1, check.names = F)) 
   #blank headers indicate additional responses under the same header as the previous - fill those in
-  for(i in seq_len(length(header)-1)) if(header[i+1] == " ") header[i+1] <- header[i]
+  headRuns <- rle(header)
+  headBlanks <- which(headRuns[[2]] == " ")
+  headRuns[[1]][headBlanks - 1] <- headRuns[[1]][headBlanks - 1] + 
+    headRuns[[1]][headBlanks]
+  headRuns <- lapply(headRuns, function(x)x[-headBlanks])
+  header <- inverse.rle(headRuns)
+  headRuns[[2]] <- seq_along(headRuns[[1]]) - length(idcols)
+  qId <- paste0("Q", inverse.rle(headRuns))
+  #for(i in seq_len(length(header)-1)) if(header[i+1] == " ") header[i+1] <- header[i]
   #load in with unaltered column names to capture second level headers
   dat <- read.xlsx2(fname, sheetIndex = 1, startRow = 2, check.names = F)
 
   #data frame to hold various properties learned about each question
   #starting with first and second level headers
   qProps <- data.frame(header = factor(header), 
-                       header2 = names(dat), stringsAsFactors = F)
+                       header2 = names(dat),
+                       questionId = qId,
+                       stringsAsFactors = F)
   
   names(dat)[idcols] <- as.character(qProps[idcols, "header"])
   dat <- data.frame(dat) #fix invalid/duplicate names for dplyr/tidyr methods to work
@@ -24,17 +34,16 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
     x
   }
   dat %<>% mutate_each(funs(makeNA))
-  print("NAs mutated")
 
   qProps$empty <- sapply(dat, function(x)all(is.na(x)))
+  
   #Questions where every answer is unique and not a number are likely to be free text
-  print("empties")
   qProps$uniqueAnswers <- !qProps$empty &
     sapply(dat, function(x)all(table(x) == 1))
-  print("unique")
+ 
   suppressWarnings(qProps$numbers <- !qProps$empty &
       sapply(dat, function(x)all(!is.na(as.numeric(as.character(na.omit(x)))))))
-  print("numbers")
+ 
   #Questions where there is only one type of answer and it matches the 
   #subheading are multiple response questions (checkboxes). For multiple
   #response matrix questions, the response is part of the subheading (which also
@@ -50,8 +59,6 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
                      multiMatrixItems = multiBlockItemTypes == 2,
                      lonely  = multiBlockItemTypes == -1)
 
-
-  print("multis")
   # Free text answers selected as those where every anser is unique, not a
   # number, and not part of a multiple response block (which would match if only
   # one non-missing answer was present)
@@ -66,7 +73,7 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
     singles
   qProps %<>% mutate(singletons = header %in% singles)
   
-  colNameGroups <- split(qProps$varNames, qProps$header)
+  colNameGroups <- split(qProps$varNames, qProps$questionId)
   row.names(qProps) <- qProps$varNames
 
   blockType <- sapply(colNameGroups, function(colNames) {
@@ -78,11 +85,7 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
     "block"
   })
   qProps %<>% mutate(blockType = blockType[header])
-  qProps %<>% mutate(#multiBlock = blockType[header] == "multiBlock",
-                     #multiMatrix = blockType[header] == "multiMatrix",
-                     #numericBlock = blockType[header] == "numericBlock",
-                     #block = blockType[header] == "block",
-                     blockExtra = ((blockType == "multiBlock" & !multiBlockItems) | 
+  qProps %<>% mutate(blockExtra = ((blockType == "multiBlock" & !multiBlockItems) | 
                        (blockType == "multiMatrix" &  !multiMatrixItems)) & !empty)
   # item labels for single response (radio button) matrices
   qProps %<>% mutate(subgroup = ifelse(blockType == "multiBlock" | singletons, NA, header2))
@@ -96,13 +99,9 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
     mutate(type = ifelse(numbers, "Numeric Entry", type)) %>%
     mutate(type = ifelse(blockType == "numericBlock", "Numeric Block", type)) 
     #mutate(type = ifelse(block & lonely, "Response Block", type))
-  
-    
-  print("props determined")
-  #names(dat)[idcols] <- qProps[idcols, "header"]
+
   gathercols <- names(dat)[-idcols]
   dat <- gather_(dat, "question", "response", gathercols, na.rm=TRUE)
-  print("data gathered")
 
   row.names(qProps) <- qProps$varNames
   dat$question <- as.character(dat$question)
@@ -125,6 +124,7 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
   dat$subgroup <- as.factor(dat$subgroup)
 
   #dat$question[!multimatrixrows] <- qProps[dat$question[!multimatrixrows], "header"]
+  dat$questionId <- qProps[dat$question, "questionId"]
   dat$question <- qProps[dat$question, "header"]
   
   #dat$question <- as.factor(dat$question)
