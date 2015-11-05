@@ -72,8 +72,28 @@ plotQuestion <- function(answers, pop.estimates = T) {
 combineSurveyData <- function(...) {
   dataList <- list(...)
   if(length(dataList) > 1){
-    #TODO: match questions between surveys, beware duplicate names
     dataList <- lapply(dataList, ensureSampleSizeAvailable)
+    #Create keys of question names (with duplicates resolved) to question ids
+    surveyQs <- lapply(dataList, function(x)unique(x[c("question", "questionId")])) %>%
+      lapply(mutate_each, funs = "as.character") %>%
+      lapply(function(qs) {
+        while(anyDuplicated(qs$question)) {
+          qs$question[duplicated(qs$question)] <- 
+            paste0(qs$question[duplicated(qs$question)], "1")
+        }
+        qs
+      })
+    #create new set of unique question ids that combines matching
+    #question names across surveys
+    newQids  <- lapply(surveyQs, extract2, "question") %>% unlist %>% unique %>% 
+      data.frame(question = ., questionId = paste0("Q",seq_along(.)))
+    #map from input data question names to duplicate resolved question names
+    #to new global unique ids
+    dataList <- mapply(function(s, q){
+      s$questionId %<>% match(q$questionId) %>% extract(q$question, .) %>% 
+        match(newQids$question) %>% extract(newQids$questionId, .) 
+      s}, dataList, surveyQs, SIMPLIFY = F)
+    
     #TODO: rather than suppress all warnings, preconvert factors
     suppressWarnings(answers <- bind_rows(dataList, .id = "Survey"))
   }  else answers <- dataList[[1]]
