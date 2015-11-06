@@ -137,11 +137,11 @@ responseBlockPlot <- function(answers, splitBy = NA,
                   max(table(answers$response, answers$subgroup, answers[[splitBy]]))) *
     length(levels(factor(answers$subgroup)))
   ratio <- pmin(1, 1 - (ratio - dotRatioFactor)/(ratio + dotRatioFactor*2))
-  #TODO will this ggplot call work with nominal data? 
-  #Is the as.numeric call necessary for ordinal data? Yes for stat_summary
+  #geom_dotplot won't do dodge by height, so offsets are added manually instead
   if(is.na(splitBy)) answers$offset <- 0 else
-    answers$offset <- (as.numeric(answers[[splitBy]]) - 
-                         mean(seq_along(levels(answers[[splitBy]]))))/10 
+    answers$offset <- (as.numeric(factor(answers[[splitBy]])) - 
+                         mean(seq_along(unique(answers[[splitBy]]))))/10 
+  #TODO will this ggplot call work with nominal data? no
   plt <- ggplot(answers, aes(x = subgroup, y = as.numeric(response) + offset)) +
     geom_dotplot(binaxis = "y", stackdir = "center", binwidth = .1, 
                  dotsize = .9, stackratio = ratio, color = NA) +
@@ -152,11 +152,12 @@ responseBlockPlot <- function(answers, splitBy = NA,
         stat_summary(aes(linetype = "Mean and\n95% Confidence Interval",
                          y = as.numeric(response)), 
                      fun.data = mean_cl_normal, size = 1,
-                     position = position_dodge(width = .5))  +
+                     position = position_dodge(width = .5),
+                     shape = 21, color = "grey40")  +
         scale_linetype_manual(name = "Population Estimates", values = 1)
     #TODO: add population estimates for nominal data
   }
-  if(!is.na(splitBy)) plt <- plt + aes_string(fill = splitBy, color = splitBy)
+  if(!is.na(splitBy)) plt <- plt + aes_string(fill = splitBy)
   tweakPlotDisplay(answers, plt, xAxisTextField = "subgroup")
 }
 
