@@ -1,4 +1,4 @@
-require(ggplot2); require(dplyr); require(Hmisc)
+require(ggplot2); require(dplyr); require(Hmisc); require(lazyeval)
 multipleResponsePlot <- function(responses, categories) {
   
   #d <- d[!is.na(d[[demographic]]) & d[[demographic]] != "other", ]
@@ -22,7 +22,7 @@ multipleResponsePlot <- function(responses, categories) {
   
 }
 
-explorePlots <- function(..., scales) {
+explorePlots <- function(..., scales, pop.estimates = T) {
   #TODO: check structure (maybe S3 class?)
   dat <- combineSurveyData(...)
   dat <- dat %>% filter(type != "Free Text") 
@@ -40,9 +40,10 @@ explorePlots <- function(..., scales) {
 #       answers$response <- n
 #       answers$type <- "Numeric Entry"
 #     }
-    if(answers$type[1] == "Numeric Entry") answers$response <- as.numeric(ansers$response)
+    if(answers$type[1] == "Numeric Entry") answers$response <- as.numeric(answers$response)
     plotQuestion(answers, 
-                 splitBy = ifelse(length(unique(dat$Survey)) > 1, "Survey", NA))
+                 splitBy = ifelse(length(unique(dat$Survey)) > 1, "Survey", NA),
+                 pop.estimates)
   }) %>% invisible
 }
 #TODO: extract the file creation to seperate method (maybe S3 print method)
@@ -105,23 +106,36 @@ combineSurveyData <- function(...) {
                       questionId = factor(questionId),
                       type = factor(type),
                       Survey = factor(Survey))
-  }  else answers <- dataList[[1]]
+  }  else answers <- ensureSampleSizeAvailable(dataList[[1]])
   answers
 }
 
-convertResponsesToProportions <- function(answers,factor = NA) {
+convertResponsesToProportions <- function(answers, factor = NA) {
   vectorizeBinomInt <- function(counts, sizes, which) {
     mapply(function(c,s,w) binom.test(c, s)$conf.int[w],
            c = counts, s = sizes, MoreArgs = list(w = which))
   }
   answers <- ensureSampleSizeAvailable(answers)
-  grps <- list("sampSize", "subgroup", "response")
-  if(!is.na(factor)) grps <- c(as.character(factor), grps)
-  answers %>% group_by_(.dots = grps) %>%
-    summarise(count = n()) %>% 
-     mutate(prop = count/sampSize,
-            upr = vectorizeBinomInt(count, sampSize, 2),
-            lwr = vectorizeBinomInt(count, sampSize, 1))
+  ssVars <- "sampSize"
+  if(!is.na(factor)) ssVars <- c(ssVars, factor)
+  sampSizes <- select_(answers, .dots = ssVars) %>% unique
+  facCols <- c("subgroup", "response")
+  if(!is.na(factor)) facCols <- c(facCols, factor) 
+  answers <- mutate_each_(answers, funs(factor), facCols)
+  #grps <- list("sampSize", "subgroup", "response")
+  #if(!is.na(factor)) grps <- c(as.character(factor), grps)
+  if(length(levels(answers$subgroup)) > 0) form <- ~ subgroup + response else
+    form <- ~ response
+  if(!is.na(factor)) form <- update(form, interp(~ x + ., x = as.name(factor)))
+  answers %>% xtabs(formula = form) %>% melt %>% merge(sampSizes) %>%
+    mutate(prop = value/sampSize,
+           upr = vectorizeBinomInt(value, sampSize, 2),
+           lwr = vectorizeBinomInt(value, sampSize, 1))
+#   answers %>% group_by_(.dots = grps) %>%
+#     summarise(count = n()) %>% 
+#      mutate(prop = count/sampSize,
+#             upr = vectorizeBinomInt(count, sampSize, 2),
+#             lwr = vectorizeBinomInt(count, sampSize, 1))
 }
 
 ensureSampleSizeAvailable <- function(answers) {
@@ -165,15 +179,16 @@ responseBlockPlot <- function(answers, splitBy = NA,
 }
 
 multipleResponseBlockPlot <- function(answers, splitBy = NA, pop.estimates = T) {
-  plt <- ggplot(convertResponsesToProportions(answers), 
+  plt <- ggplot(convertResponsesToProportions(answers, splitBy), 
                 aes(x = response, fill = subgroup, y = prop,
                                        ymax = upr, ymin = lwr)) +
     geom_bar(stat = "identity", position = "dodge") +
     labs(x = "Response", y = "Proportion")
   if(pop.estimates) plt <- plt + 
-      geom_errorbar(aes(color= "95% Confidence Interval\nof the Proportion"),
-                    position = "dodge") + 
+      geom_errorbar(aes(color = "95% Confidence Interval\nof the Proportion"),
+                    position = position_dodge(width = .885), width = .5) + 
       scale_color_manual(name = "Population Estimates", values = "grey50")
+  if(!is.na(splitBy)) plt <- plt + facet_grid(interp(x ~ ., x = as.name(splitBy)))
   tweakPlotDisplay(answers, plt, xAxisTextField = "response")
 }
 
@@ -200,23 +215,44 @@ multipleResponseQuestionPlot <- function(answers, splitBy = NA, pop.estimates = 
   tweakPlotDisplay(answers, plt, xAxisTextField = "response")
 }
 
-numericEntryPlot <- function(answers, pop.estimates = T,
+numericEntryPlot <- function(answers, splitBy = NA, pop.estimates = T,
                              summaryFun = ifelse(nrow(answers) > 4, smean.cl.normal, smean.cl.boot)) {
   if(length(unique(answers$subgroup)) > 1) return(numericBlockPlot(answers, pop.estimates))
-  plt <- ggplot(answers, aes(x = response)) + geom_bar(position = "dodge") +
+  mean_cl_h <- function(x) {
+    summaryFun(x) %>% t %>% data.frame %>% extract( , 1:3) %>%
+      set_names(c("center", "lower", "upper"))
+  }
+  plt <- ggplot(answers, aes(x = response)) + 
+    geom_bar(position = position_dodge(width = .85), 
+             alpha = ifelse(is.na(splitBy), 1, .8)) +
     labs(x = "Response", y = "Count")
   if(pop.estimates) {
-    est <- do.call(summaryFun, list(answers$response))
-    plt <- plt +
+    #no ggplot summary functions work on the x values, so summaries
+    #calculated manually
+    if(is.na(splitBy)) {
+      est <- mean_cl_h(answers$response) %>% mutate(offset = -.1)
+    } else {
+      est <- split(answers$response, answers[[splitBy]]) %>% 
+        lapply(mean_cl_h) %>% bind_rows %>% 
+        mutate(offset = (seq_along(center) - 1) * -1/10) %>%
+        cbind(Survey = levels(answers[[splitBy]]))
+      names(est)[length(names(est))] <- splitBy
+    }
+    plt <- plt + 
       geom_errorbarh(
-        aes_q(y = -.05, x = unname(est[1]), 
-            xmin = unname(est[2]),
-            xmax = unname(est[3]),
-            color = "Mean and\n95% Confidence Interval"),
-        height = 0, size = 3) +
-      geom_point(aes(y = -.05, x = mean(response), 
-                     color = "Mean and\n95% Confidence Interval"), size = 8) +
-      scale_color_manual(name = "Population Estimates", values = "grey50")
+        aes(y = offset, x = center, xmin = lower, xmax = upper,
+            alpha = "Mean and\n95% Confidence Interval"),
+        data = est, height = 0, size = 1.5, color = "grey50") +
+       geom_point(aes(y = offset, x = center,
+                      alpha = "Mean and\n95% Confidence Interval"),  
+                  data = est, size = 5, color = "grey50",
+                  shape = ifelse(is.na(splitBy), 19, 21)) +
+      scale_alpha_manual(name = "Population Estimates", values = 1)
+  }
+  if(!is.na(splitBy)) {
+    plt <- plt + aes_string(fill = splitBy) + 
+      guides(fill = guide_legend(override.aes = list(shape = NA)),
+             alpha = guide_legend(override.aes = list(shape = 21, fill = "white")))
   }
   tweakPlotDisplay(answers, plt, xAxisTextField = NA)
 }
