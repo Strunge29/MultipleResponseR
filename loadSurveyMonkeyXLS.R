@@ -78,8 +78,8 @@ loadSurveyMonkeyXLS <- function(fname, idcols = 1:9) {
 
   blockType <- sapply(colNameGroups, function(colNames) {
     if(length(colNames) < 2) return("")
-    if(any(qProps[colNames, "multiBlockItems"])) return("multiBlock")
     if(any(qProps[colNames, "multiMatrixItems"])) return("multiMatrix")
+    if(any(qProps[colNames, "multiBlockItems"])) return("multiBlock")
     if(all(qProps[colNames, "numbers"])) return("numericBlock")
     if(sum(qProps[colNames, "lonely"]) > 1) return("lonelyBlock")
     "block"

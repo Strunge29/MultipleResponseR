@@ -22,8 +22,8 @@ multipleResponsePlot <- function(responses, categories) {
   
 }
 
-explorePlots <- function(..., scales, outputFolder = character(0)) {
-  #todo, check structure (maybe S3 class?)
+explorePlots <- function(..., scales) {
+  #TODO: check structure (maybe S3 class?)
   dat <- combineSurveyData(...)
   dat <- dat %>% filter(type != "Free Text") 
   lapply(split(dat, list(dat$questionId, dat$type), drop = T), 
@@ -35,16 +35,18 @@ explorePlots <- function(..., scales, outputFolder = character(0)) {
             warning("Multiple scales matched to responses for '", 
                     dat$question[1], 
                     "'. Plotting as discrete/nominal responses. If ordinal is desired, ensure all items in exactly one scale match to responses for this question.")
-    n <- suppressWarnings(as.numeric(as.character(answers$response)))
-    if(!anyNA(n)) { 
-      answers$response <- n
-      answers$type <- "Numeric Entry"
-    }
-    plotQuestion(answers)
+#     n <- suppressWarnings(as.numeric(as.character(answers$response)))
+#     if(!anyNA(n)) { 
+#       answers$response <- n
+#       answers$type <- "Numeric Entry"
+#     }
+    if(answers$type[1] == "Numeric Entry") answers$response <- as.numeric(ansers$response)
+    plotQuestion(answers, 
+                 splitBy = ifelse(length(unique(dat$Survey)) > 1, "Survey", NA))
   }) %>% invisible
 }
 #TODO: extract the file creation to seperate method (maybe S3 print method)
-plotQuestion <- function(answers, pop.estimates = T) {
+plotQuestion <- function(answers, splitBy = NA, pop.estimates = T) {
   t <- as.character(unique(answers$type))
   if (length(t) > 1) stop("Unable to plot question block with multiple response types")
 #   if(length(outputFolder)) {
@@ -60,13 +62,16 @@ plotQuestion <- function(answers, pop.estimates = T) {
 
   #xLabsLength <- sum(nchar(unique(as.character(answers$response))))
   switch(t,
-         `Response Block` = 
-         {responseBlockPlot(answers, pop.estimates)},
+         `Response Block` =
+         {responseBlockPlot(answers, splitBy, pop.estimates)},
          `Multiple Response Block` = 
-         {multipleResponseBlockPlot(answers, pop.estimates)},
-         `Single Question` = {singleQuestionPlot(answers, pop.estimates)},
-         `Numeric Entry` = {numericEntryPlot(answers, pop.estimates)},
-         `Multiple Response Question` = {multipleResponseQuestionPlot(answers, pop.estimates)})
+         {multipleResponseBlockPlot(answers, splitBy, pop.estimates)},
+         `Single Question` = 
+         {singleQuestionPlot(answers, splitBy, pop.estimates)},
+         `Numeric Entry` = 
+         {numericEntryPlot(answers, splitBy, pop.estimates)},
+         `Multiple Response Question` = 
+         {multipleResponseQuestionPlot(answers, splitBy, pop.estimates)})
 }
 
 combineSurveyData <- function(...) {
@@ -91,18 +96,20 @@ combineSurveyData <- function(...) {
     #to new global unique ids
     dataList <- mapply(function(s, q){
       s$questionId %<>% match(q$questionId) %>% extract(q$question, .) %>% 
-        match(newQids$question) %>% extract(newQids$questionId, .) 
+        match(newQids$question) %>% extract(newQids$questionId, .)
       s}, dataList, surveyQs, SIMPLIFY = F)
     
     #TODO: rather than suppress all warnings, preconvert factors
     suppressWarnings(answers <- bind_rows(dataList, .id = "Survey"))
+    answers <- mutate(answers, question = factor(question), 
+                      questionId = factor(questionId),
+                      type = factor(type),
+                      Survey = factor(Survey))
   }  else answers <- dataList[[1]]
   answers
 }
 
-convertResponsesToProportions <- function(answers, factor = NA) {
-#   if(is.null(answers$sampSize)) answers <- 
-#       mutate(answers, sampSize = length(unique(RespondentID)))
+convertResponsesToProportions <- function(answers,factor = NA) {
   vectorizeBinomInt <- function(counts, sizes, which) {
     mapply(function(c,s,w) binom.test(c, s)$conf.int[w],
            c = counts, s = sizes, MoreArgs = list(w = which))
@@ -123,23 +130,33 @@ ensureSampleSizeAvailable <- function(answers) {
   answers
 }
 
-responseBlockPlot <- function(answers, pop.estimates = T, dotRatioFactor = 15) {
-  ratio <- max(table(answers$response, answers$subgroup)) *
+responseBlockPlot <- function(answers, splitBy = NA,
+                              pop.estimates = T, dotRatioFactor = 15) {
+  ratio <- ifelse(is.na(splitBy), 
+                  max(table(answers$response, answers$subgroup)),
+                  max(table(answers$response, answers$subgroup, answers[[splitBy]]))) *
     length(levels(factor(answers$subgroup)))
   ratio <- pmin(1, 1 - (ratio - dotRatioFactor)/(ratio + dotRatioFactor*2))
-  #TODO will this ggplot call work with nominal data? Is the as.numeric call necessary for ordinal data?
-  plt <- ggplot(answers, aes(x = subgroup, y = as.numeric(response))) +
-    geom_dotplot(binaxis = "y", stackdir = "center", binwidth = 1, 
-                 dotsize = .1, stackratio = ratio) +
+  #TODO will this ggplot call work with nominal data? 
+  #Is the as.numeric call necessary for ordinal data? Yes for stat_summary
+  if(is.na(splitBy)) answers$offset <- 0 else
+    answers$offset <- (as.numeric(answers[[splitBy]]) - 
+                         mean(seq_along(levels(answers[[splitBy]]))))/10 
+  plt <- ggplot(answers, aes(x = subgroup, y = as.numeric(response) + offset)) +
+    geom_dotplot(binaxis = "y", stackdir = "center", binwidth = .1, 
+                 dotsize = .9, stackratio = ratio, color = NA) +
     scale_y_discrete(limits = levels(answers$response)) + 
     labs(x = "Item", y = "Response")
   if(pop.estimates) {
     if(is.ordered(answers$response)) plt <- plt +
-        stat_summary(aes(color = "Mean and\n95% Confidence Interval"), 
-                     fun.data = mean_cl_normal, size = 1.5)  +
-        scale_color_manual(name = "Population Estimates", values = "grey50")
+        stat_summary(aes(linetype = "Mean and\n95% Confidence Interval",
+                         y = as.numeric(response)), 
+                     fun.data = mean_cl_normal, size = 1,
+                     position = position_dodge(width = .5))  +
+        scale_linetype_manual(name = "Population Estimates", values = 1)
     #TODO: add population estimates for nominal data
   }
+  if(!is.na(splitBy)) plt <- plt + aes_string(fill = splitBy, color = splitBy)
   tweakPlotDisplay(answers, plt, xAxisTextField = "subgroup")
 }
 
@@ -174,7 +191,7 @@ multipleResponseQuestionPlot <- function(answers, splitBy = NA, pop.estimates = 
       geom_errorbar(aes(color= "95% Confidence Interval\nof the Proportion"),
                     position = position_dodge(width = .885), width = .5) + 
       scale_color_manual(name = "Population Estimates", values = "grey50")
-  if(!is.na(splitBy)) plt <- plt + aes(fill = Survey)
+  if(!is.na(splitBy)) plt <- plt + aes_string(fill = splitBy)
   
   tweakPlotDisplay(answers, plt, xAxisTextField = "response")
 }
