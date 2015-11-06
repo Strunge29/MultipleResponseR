@@ -64,16 +64,18 @@ plotQuestion <- function(answers, splitBy = NA, pop.estimates = T) {
 
   #xLabsLength <- sum(nchar(unique(as.character(answers$response))))
   switch(t,
-         `Response Block` =
-         {responseBlockPlot(answers, splitBy, pop.estimates)},
+         `Response Block` = 
+         {responseBlockPlot(answers, splitBy = splitBy, pop.estimates = pop.estimates)},
          `Multiple Response Block` = 
-         {multipleResponseBlockPlot(answers, splitBy, pop.estimates)},
+         {multipleResponseBlockPlot(answers, splitBy = splitBy, pop.estimates = pop.estimates)},
          `Single Question` = 
-         {singleQuestionPlot(answers, splitBy, pop.estimates)},
+           {singleQuestionPlot(answers, splitBy = splitBy, pop.estimates = pop.estimates)},
          `Numeric Entry` = 
-         {numericEntryPlot(answers, splitBy, pop.estimates)},
+           {numericEntryPlot(answers, splitBy = splitBy, pop.estimates = pop.estimates)},
          `Multiple Response Question` = 
-         {multipleResponseQuestionPlot(answers, splitBy, pop.estimates)})
+           {multipleResponseQuestionPlot(answers, splitBy = splitBy, pop.estimates = pop.estimates)},
+         `Numeric Block` = 
+           {numericBlockPlot(answers, splitBy = splitBy, pop.estimates = pop.estimates)})
 }
 
 combineSurveyData <- function(...) {
@@ -131,7 +133,6 @@ convertResponsesToProportions <- function(answers, factor = NA) {
     mutate(prop = value/sampSize,
            upr = vectorizeBinomInt(value, sampSize, 2),
            lwr = vectorizeBinomInt(value, sampSize, 1))
-
 }
 
 ensureSampleSizeAvailable <- function(answers) {
@@ -239,8 +240,6 @@ multipleResponseQuestionPlot <- function(answers, splitBy = NA, pop.estimates = 
 }
 
 numericEntryPlot <- function(answers, splitBy = NA, pop.estimates = T, ...) {
-  if(length(unique(answers$subgroup)) > 1) return(numericBlockPlot(answers, pop.estimates))
-
   plt <- ggplot(answers, aes(x = response)) + 
     geom_bar(position = position_dodge(width = .85), 
              alpha = ifelse(is.na(splitBy), 1, .8)) +
