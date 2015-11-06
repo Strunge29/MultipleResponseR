@@ -265,25 +265,26 @@ numericBlockPlot <- function(answers, splitBy = NA, pop.estimates = T, dotRatioF
     length(levels(factor(answers$subgroup)))
   ratio <- pmin(1, 1 - (ratio - dotRatioFactor)/(ratio + dotRatioFactor*2))
   #geom_dotplot won't dodge by height, so offsets are added manually 
+  #TODO: figure out the offsets - currently having no effect due to binning
   if(is.na(splitBy)) answers$offset <- 0 else
     answers$offset <- (as.numeric(factor(answers[[splitBy]])) - 
-                         mean(seq_along(unique(answers[[splitBy]]))))/10 
+                         mean(seq_along(unique(answers[[splitBy]]))))/3 
   plt <- ggplot(answers, aes(x = subgroup, y = response + offset)) +
-    geom_dotplot(binaxis = "y", stackdir = "center", 
+    geom_dotplot(binaxis = "y", stackdir = "center", color = NA,
                  dotsize = 1, stackratio = ratio) +
     labs(x = "Item", y = "Response")
   if(pop.estimates) {
     plt <- plt +
         stat_summary(aes(linetype = "Mean and\n95% Confidence Interval"), 
-                     fun.data = summaryFun, size = .75,
-                     position = position_dodge(width = .5),
+                     fun.data = summaryFun, size = 1.5,
+                     position = position_dodge(width = .1),
                      shape = ifelse(is.na(splitBy), 19, 21), 
-                     color = "grey50")  +
+                     color = "grey30", alpha = .8)  +
         scale_linetype_manual(name = "Population Estimates", values = 1)
   }
   if(!is.na(splitBy)) plt <- plt + aes_string(fill = splitBy) + 
-    guides(fill = guide_legend(override.aes = list(linetype = 0)),
-           linetype = guide_legend(override.aes = list(fill = "white")))
+    guides(fill = guide_legend(override.aes = list(linetype = 0, size = 1)),
+           linetype = guide_legend(override.aes = list(fill = "white", alpha = 1)))
   tweakPlotDisplay(answers, plt, xAxisTextField = "subgroup")  
 }
 
