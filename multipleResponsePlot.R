@@ -218,10 +218,7 @@ multipleResponseQuestionPlot <- function(answers, splitBy = NA, pop.estimates = 
 numericEntryPlot <- function(answers, splitBy = NA, pop.estimates = T,
                              summaryFun = ifelse(nrow(answers) > 4, smean.cl.normal, smean.cl.boot)) {
   if(length(unique(answers$subgroup)) > 1) return(numericBlockPlot(answers, pop.estimates))
-  mean_cl_h <- function(x) {
-    summaryFun(x) %>% t %>% data.frame %>% extract( , 1:3) %>%
-      set_names(c("center", "lower", "upper"))
-  }
+
   plt <- ggplot(answers, aes(x = response)) + 
     geom_bar(position = position_dodge(width = .85), 
              alpha = ifelse(is.na(splitBy), 1, .8)) +
@@ -229,6 +226,8 @@ numericEntryPlot <- function(answers, splitBy = NA, pop.estimates = T,
   if(pop.estimates) {
     #no ggplot summary functions work on the x values, so summaries
     #calculated manually
+    mean_cl_h <- function(x) summaryFun(as.numeric(x)) %>% t %>% data.frame %>% 
+      extract( , 1:3) %>% set_names(c("center", "lower", "upper"))
     if(is.na(splitBy)) {
       est <- mean_cl_h(answers$response) %>% mutate(offset = -.1)
     } else {
@@ -275,22 +274,23 @@ numericBlockPlot <- function(answers, pop.estimates = T, dotRatioFactor = 30,
   tweakPlotDisplay(answers, plt, xAxisTextField = "subgroup")  
 }
 
-singleQuestionPlot <- function(answers, pop.estimates = T) {
+singleQuestionPlot <- function(answers, splitBy = NA, pop.estimates = T) {
   if(is.ordered(answers$response)) {
-    plt <- mutate(answers, response = as.numeric(response)) %>%  
-      numericEntryPlot(pop.estimates)
+    plt <- #mutate(answers, response = as.numeric(response)) %>%  
+      numericEntryPlot(answers, splitBy = splitBy, pop.estimates = pop.estimates)
     plt <- plt + scale_x_discrete(limits = levels(answers$response))
     } else {
-      plt <- ggplot(convertResponsesToProportions(answers), 
+      plt <- ggplot(convertResponsesToProportions(answers, factor = splitBy), 
                     aes(x = response, y = prop,
                         ymax = upr, ymin = lwr)) +
-        geom_bar(stat = "identity") + 
+        geom_bar(stat = "identity", position = "dodge") + 
         labs(x = "Response", y = "Proportion")
       if(pop.estimates) plt <- plt + 
           geom_errorbar(aes(color= "95% Confidence Interval\nof the Proportion"),
-                        width = .5) +
+                        width = .5, position = position_dodge(width = .85)) +
           scale_color_manual(name = "Population Estimates", values = "grey50")
-      }               
+    }
+  if(!is.na(splitBy)) plt <- plt + aes_string(fill = splitBy)
 
   tweakPlotDisplay(answers, plt, xAxisTextField = "response")
 }
