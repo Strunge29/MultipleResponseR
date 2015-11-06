@@ -122,8 +122,7 @@ convertResponsesToProportions <- function(answers, factor = NA) {
   facCols <- c("subgroup", "response")
   if(!is.na(factor)) facCols <- c(facCols, factor) 
   answers <- mutate_each_(answers, funs(factor), facCols)
-  #grps <- list("sampSize", "subgroup", "response")
-  #if(!is.na(factor)) grps <- c(as.character(factor), grps)
+
   if(length(levels(answers$subgroup)) > 0) form <- ~ subgroup + response else
     form <- ~ response
   if(!is.na(factor)) form <- update(form, interp(~ x + ., x = as.name(factor)))
@@ -131,17 +130,40 @@ convertResponsesToProportions <- function(answers, factor = NA) {
     mutate(prop = value/sampSize,
            upr = vectorizeBinomInt(value, sampSize, 2),
            lwr = vectorizeBinomInt(value, sampSize, 1))
-#   answers %>% group_by_(.dots = grps) %>%
-#     summarise(count = n()) %>% 
-#      mutate(prop = count/sampSize,
-#             upr = vectorizeBinomInt(count, sampSize, 2),
-#             lwr = vectorizeBinomInt(count, sampSize, 1))
+
 }
 
 ensureSampleSizeAvailable <- function(answers) {
   if(is.null(answers$sampSize)) answers <- 
       mutate(answers, sampSize = length(unique(RespondentID)))
   answers
+}
+
+#substitutes for the lack of x value summary support in ggplot
+add_horizontal_summary <- function(plt, answers, splitBy, 
+                               summaryFun = ifelse(nrow(answers) > 4, smean.cl.normal, smean.cl.boot),
+                               dodgeFactor = .1) {
+
+  mean_cl_h <- function(x) summaryFun(as.numeric(x)) %>% t %>% data.frame %>% 
+    extract( , 1:3) %>% set_names(c("center", "lower", "upper"))
+  if(is.na(splitBy)) {
+    est <- mean_cl_h(answers$response) %>% mutate(offset = -.1)
+  } else {
+    est <- split(answers$response, answers[[splitBy]]) %>% 
+      lapply(mean_cl_h) %>% bind_rows %>% 
+      mutate(offset = (seq_along(center) - 1) * -1 * dodgeFactor) %>%
+      cbind(Survey = levels(answers[[splitBy]]))
+    names(est)[length(names(est))] <- splitBy
+  }
+  plt + geom_errorbarh(
+    aes(y = offset, x = center, xmin = lower, xmax = upper,
+        alpha = "Mean and\n95% Confidence Interval"),
+    data = est, height = 0, size = 1.5, color = "grey50") +
+    geom_point(aes(y = offset, x = center,
+                   alpha = "Mean and\n95% Confidence Interval"),  
+               data = est, size = 5, color = "grey50",
+               shape = ifelse(is.na(splitBy), 19, 21)) +
+    scale_alpha_manual(name = "Population Estimates", values = 1)
 }
 
 responseBlockPlot <- function(answers, splitBy = NA,
@@ -215,8 +237,7 @@ multipleResponseQuestionPlot <- function(answers, splitBy = NA, pop.estimates = 
   tweakPlotDisplay(answers, plt, xAxisTextField = "response")
 }
 
-numericEntryPlot <- function(answers, splitBy = NA, pop.estimates = T,
-                             summaryFun = ifelse(nrow(answers) > 4, smean.cl.normal, smean.cl.boot)) {
+numericEntryPlot <- function(answers, splitBy = NA, pop.estimates = T, ...) {
   if(length(unique(answers$subgroup)) > 1) return(numericBlockPlot(answers, pop.estimates))
 
   plt <- ggplot(answers, aes(x = response)) + 
@@ -226,27 +247,7 @@ numericEntryPlot <- function(answers, splitBy = NA, pop.estimates = T,
   if(pop.estimates) {
     #no ggplot summary functions work on the x values, so summaries
     #calculated manually
-    mean_cl_h <- function(x) summaryFun(as.numeric(x)) %>% t %>% data.frame %>% 
-      extract( , 1:3) %>% set_names(c("center", "lower", "upper"))
-    if(is.na(splitBy)) {
-      est <- mean_cl_h(answers$response) %>% mutate(offset = -.1)
-    } else {
-      est <- split(answers$response, answers[[splitBy]]) %>% 
-        lapply(mean_cl_h) %>% bind_rows %>% 
-        mutate(offset = (seq_along(center) - 1) * -1/10) %>%
-        cbind(Survey = levels(answers[[splitBy]]))
-      names(est)[length(names(est))] <- splitBy
-    }
-    plt <- plt + 
-      geom_errorbarh(
-        aes(y = offset, x = center, xmin = lower, xmax = upper,
-            alpha = "Mean and\n95% Confidence Interval"),
-        data = est, height = 0, size = 1.5, color = "grey50") +
-       geom_point(aes(y = offset, x = center,
-                      alpha = "Mean and\n95% Confidence Interval"),  
-                  data = est, size = 5, color = "grey50",
-                  shape = ifelse(is.na(splitBy), 19, 21)) +
-      scale_alpha_manual(name = "Population Estimates", values = 1)
+    plt <- add_horizontal_summary(plt, answers, splitBy, ...)
   }
   if(!is.na(splitBy)) {
     plt <- plt + aes_string(fill = splitBy) + 
@@ -274,24 +275,31 @@ numericBlockPlot <- function(answers, pop.estimates = T, dotRatioFactor = 30,
   tweakPlotDisplay(answers, plt, xAxisTextField = "subgroup")  
 }
 
-singleQuestionPlot <- function(answers, splitBy = NA, pop.estimates = T) {
-  if(is.ordered(answers$response)) {
-    plt <- #mutate(answers, response = as.numeric(response)) %>%  
-      numericEntryPlot(answers, splitBy = splitBy, pop.estimates = pop.estimates)
-    plt <- plt + scale_x_discrete(limits = levels(answers$response))
+singleQuestionPlot <- function(answers, splitBy = NA, pop.estimates = T, ...) {
+#   if(is.ordered(answers$response)) {
+#     plt <- #mutate(answers, response = as.numeric(response)) %>%  
+#       numericEntryPlot(answers, splitBy = splitBy, pop.estimates = pop.estimates)
+#     plt <- plt + scale_x_discrete(limits = levels(answers$response))
+#     } else {
+  plt <- ggplot(convertResponsesToProportions(answers, factor = splitBy), 
+                aes(x = response, y = prop)) +
+    geom_bar(stat = "identity", position = "dodge") + 
+    labs(x = "Response", y = "Proportion")
+  if(pop.estimates) {
+    if(is.ordered(answers$response)) {
+      plt <- add_horizontal_summary(plt, answers, splitBy, dodgeFactor = 0.02, ...) +
+        guides(alpha = guide_legend(override.aes = list(shape = 21, fill = "white")))
     } else {
-      plt <- ggplot(convertResponsesToProportions(answers, factor = splitBy), 
-                    aes(x = response, y = prop,
-                        ymax = upr, ymin = lwr)) +
-        geom_bar(stat = "identity", position = "dodge") + 
-        labs(x = "Response", y = "Proportion")
-      if(pop.estimates) plt <- plt + 
-          geom_errorbar(aes(color= "95% Confidence Interval\nof the Proportion"),
-                        width = .5, position = position_dodge(width = .85)) +
-          scale_color_manual(name = "Population Estimates", values = "grey50")
+      plt <- plt + aes(ymax = upr, ymin = lwr) +
+        geom_errorbar(aes(color= "95% Confidence Interval\nof the Proportion"),
+                      width = .5, position = position_dodge(width = .85)) +
+        scale_color_manual(name = "Population Estimates", values = "grey50")
     }
-  if(!is.na(splitBy)) plt <- plt + aes_string(fill = splitBy)
-
+  }
+  #}
+  if(!is.na(splitBy)) plt <- plt + aes_string(fill = splitBy) +
+      guides(fill = guide_legend(override.aes = list(shape = NA)))
+  
   tweakPlotDisplay(answers, plt, xAxisTextField = "response")
 }
 
