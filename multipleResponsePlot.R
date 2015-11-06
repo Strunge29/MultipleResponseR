@@ -40,7 +40,8 @@ explorePlots <- function(..., scales, pop.estimates = T) {
 #       answers$response <- n
 #       answers$type <- "Numeric Entry"
 #     }
-    if(answers$type[1] == "Numeric Entry") answers$response <- as.numeric(answers$response)
+    if(answers$type[1] %in% c("Numeric Entry", "Numeric Block")) 
+      answers$response <- as.numeric(answers$response)
     plotQuestion(answers, 
                  splitBy = ifelse(length(unique(dat$Survey)) > 1, "Survey", NA),
                  pop.estimates)
@@ -257,21 +258,33 @@ numericEntryPlot <- function(answers, splitBy = NA, pop.estimates = T, ...) {
   tweakPlotDisplay(answers, plt, xAxisTextField = NA)
 }
 
-numericBlockPlot <- function(answers, pop.estimates = T, dotRatioFactor = 30, 
+numericBlockPlot <- function(answers, splitBy = NA, pop.estimates = T, dotRatioFactor = 30, 
                              nBins = 30, summaryFun = mean_cl_boot) {
-  ratio <- max(tabulate(cut(answers$response, nBins))) *
+  ratio <- ifelse(is.na(splitBy), 
+                  max(table(answers$response, answers$subgroup)),
+                  max(table(answers$response, answers$subgroup, answers[[splitBy]]))) *
     length(levels(factor(answers$subgroup)))
   ratio <- pmin(1, 1 - (ratio - dotRatioFactor)/(ratio + dotRatioFactor*2))
-  plt <- ggplot(answers, aes(x = subgroup, y = response)) +
+  #geom_dotplot won't dodge by height, so offsets are added manually 
+  if(is.na(splitBy)) answers$offset <- 0 else
+    answers$offset <- (as.numeric(factor(answers[[splitBy]])) - 
+                         mean(seq_along(unique(answers[[splitBy]]))))/10 
+  plt <- ggplot(answers, aes(x = subgroup, y = response + offset)) +
     geom_dotplot(binaxis = "y", stackdir = "center", 
                  dotsize = 1, stackratio = ratio) +
     labs(x = "Item", y = "Response")
   if(pop.estimates) {
     plt <- plt +
-        stat_summary(aes(color = "Mean and\n95% Confidence Interval"), 
-                     fun.data = summaryFun, size = .75)  +
-        scale_color_manual(name = "Population Estimates", values = "grey50")
+        stat_summary(aes(linetype = "Mean and\n95% Confidence Interval"), 
+                     fun.data = summaryFun, size = .75,
+                     position = position_dodge(width = .5),
+                     shape = ifelse(is.na(splitBy), 19, 21), 
+                     color = "grey50")  +
+        scale_linetype_manual(name = "Population Estimates", values = 1)
   }
+  if(!is.na(splitBy)) plt <- plt + aes_string(fill = splitBy) + 
+    guides(fill = guide_legend(override.aes = list(linetype = 0)),
+           linetype = guide_legend(override.aes = list(fill = "white")))
   tweakPlotDisplay(answers, plt, xAxisTextField = "subgroup")  
 }
 
