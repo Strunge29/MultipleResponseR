@@ -1,4 +1,4 @@
-require(ggplot2); require(dplyr); require(Hmisc); require(lazyeval)
+require(ggplot2); require(dplyr); require(Hmisc); require(lazyeval); require(reshape2)
 multipleResponsePlot <- function(responses, categories) {
   
   #d <- d[!is.na(d[[demographic]]) & d[[demographic]] != "other", ]
